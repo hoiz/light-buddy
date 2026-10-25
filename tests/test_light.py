@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+import pytest
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
@@ -11,6 +12,7 @@ from custom_components.light_buddy.const import DOMAIN
 from homeassistant.components.light import DATA_COMPONENT, ColorMode, LightEntity
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -26,6 +28,11 @@ def _room(hass: HomeAssistant, entity_id: str = ROOM) -> LightEntity:
     replace the service call to the room light.
     """
     return hass.data[DATA_COMPONENT].get_entity(entity_id)
+
+
+def _registry_id(hass: HomeAssistant, entity_id: str) -> str:
+    """Return the entity registry id, which offsets are stored by."""
+    return er.async_get(hass).async_get(entity_id).id
 
 
 async def _settle(hass: HomeAssistant) -> None:
@@ -303,8 +310,8 @@ async def test_offset_applies_and_is_hidden(
     await setup_integration(
         {
             "offsets": {
-                cold: {"value": -300, "unit": "K"},
-                clamped: {"value": -500, "unit": "K"},
+                _registry_id(hass, cold): {"value": -300, "unit": "K"},
+                _registry_id(hass, clamped): {"value": -500, "unit": "K"},
             }
         }
     )
@@ -337,5 +344,92 @@ async def test_offset_applies_and_is_hidden(
     )
     hass.states.async_set(plain, STATE_OFF, WHITE_LIGHT)
     hass.states.async_set(clamped, STATE_OFF, COLOR_LIGHT)
+    await hass.async_block_till_done()
+    assert hass.states.get(ROOM).attributes["color_temp_kelvin"] == 4000
+
+
+async def test_offset_survives_entity_id_change(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Offsets follow a light when its entity id changes."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    await setup_integration(
+        {"offsets": {_registry_id(hass, lamp): {"value": -300, "unit": "K"}}}
+    )
+    er.async_get(hass).async_update_entity(lamp, new_entity_id="light.stehlampe")
+    hass.states.async_set("light.stehlampe", STATE_OFF, COLOR_LIGHT)
+    await _settle(hass)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    await _room(hass).async_turn_on(color_temp_kelvin=3000)
+    assert [call.data for call in calls] == [
+        {"entity_id": ["light.stehlampe"], "color_temp_kelvin": 2700}
+    ]
+
+
+async def test_failing_call_does_not_block_others(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """When one call fails, the other lights still get their command."""
+    first = add_light("a_first", area="Wohnzimmer")
+    second = add_light("b_second", area="Wohnzimmer")
+    await setup_integration(
+        {"offsets": {_registry_id(hass, first): {"value": -300, "unit": "K"}}}
+    )
+    calls = []
+
+    async def turn_on(call) -> None:
+        calls.append(call.data)
+        if first in call.data["entity_id"]:
+            raise HomeAssistantError("unreachable")
+
+    hass.services.async_register("light", "turn_on", turn_on)
+
+    with pytest.raises(HomeAssistantError):
+        await _room(hass).async_turn_on(color_temp_kelvin=3000)
+    assert [data["entity_id"] for data in calls] == [[first], [second]]
+    # Only what was really sent is remembered.
+    assert set(_room(hass)._commander.sent_color_temps) == {second}
+
+
+async def test_shown_color_temp_follows_other_changes(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light changed elsewhere shows its own value, within the room's range."""
+    cold = add_light("cold", area="Wohnzimmer")
+    warm = add_light("warm", area="Wohnzimmer")
+    await setup_integration(
+        {
+            "offsets": {
+                _registry_id(hass, cold): {"value": 300, "unit": "K"},
+                _registry_id(hass, warm): {"value": -300, "unit": "K"},
+            }
+        }
+    )
+    async_mock_service(hass, "light", "turn_on")
+    await _room(hass).async_turn_on(color_temp_kelvin=3900)
+    on = {"color_mode": ColorMode.COLOR_TEMP, "brightness": 100}
+
+    # 4200 K was clamped to the maximum of 4000 K, the room shows the request.
+    hass.states.async_set(
+        cold, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 4000}
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(ROOM).attributes["color_temp_kelvin"] == 3900
+
+    # Changed elsewhere: the offset is taken out of the reported value, also
+    # once the light is back at the value that was sent.
+    for reported, shown in ((3000, 2700), (4000, 3700)):
+        hass.states.async_set(
+            cold, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": reported}
+        )
+        await hass.async_block_till_done()
+        assert hass.states.get(ROOM).attributes["color_temp_kelvin"] == shown
+
+    # 3900 K plus 300 K is beyond the room's maximum of 4000 K.
+    hass.states.async_set(cold, STATE_OFF, COLOR_LIGHT)
+    hass.states.async_set(
+        warm, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 3900}
+    )
     await hass.async_block_till_done()
     assert hass.states.get(ROOM).attributes["color_temp_kelvin"] == 4000

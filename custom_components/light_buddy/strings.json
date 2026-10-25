@@ -47,7 +47,8 @@
       }
     },
     "error": {
-      "offset_too_large": "The offset is too large (at most 3000 K or 300 mired)."
+      "offset_too_large": "The offset is too large: at most {max_kelvin} K or {max_mired} mired.",
+      "invalid_light": "Choose a single light. Light Buddy room lights and light groups can't have an offset."
     }
   },
   "entity": {

@@ -47,7 +47,8 @@
       }
     },
     "error": {
-      "offset_too_large": "Der Offset ist zu groß (höchstens 3000 K oder 300 Mired)."
+      "offset_too_large": "Der Offset ist zu groß: höchstens {max_kelvin} K oder {max_mired} Mired.",
+      "invalid_light": "Bitte eine einzelne Lampe wählen. Light-Buddy-Raum-Lichter und Lichtgruppen können keinen Offset haben."
     }
   },
   "entity": {

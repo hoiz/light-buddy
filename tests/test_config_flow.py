@@ -12,6 +12,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
 
 
 async def _open_step(
@@ -79,11 +80,15 @@ async def test_offset_flow(hass: HomeAssistant, add_light, setup_integration) ->
     result = await _open_step(hass, entry, "offsets")
     assert result["step_id"] == "offsets"
     result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"light": "light.all_wohnzimmer"}
+    )
+    assert result["errors"] == {"light": "invalid_light"}
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"light": lamp}
     )
     assert result["step_id"] == "offset"
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"unit": "K", "value": -5000}
+        result["flow_id"], {"unit": "mired", "value": 150}
     )
     assert result["errors"] == {"value": "offset_too_large"}
     result = await hass.config_entries.options.async_configure(
@@ -91,9 +96,10 @@ async def test_offset_flow(hass: HomeAssistant, add_light, setup_integration) ->
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
+    registry_id = er.async_get(hass).async_get(lamp).id
     assert entry.options == {
         CONF_EXCLUDED_AREAS: ["bad"],
-        CONF_OFFSETS: {lamp: {"value": -300, "unit": "K"}},
+        CONF_OFFSETS: {registry_id: {"value": -300, "unit": "K"}},
     }
 
     result = await _open_step(hass, entry, "offsets")

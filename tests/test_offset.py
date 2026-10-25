@@ -35,3 +35,11 @@ def test_same_color_temp() -> None:
     """Rounding to whole mireds does not count as a change."""
     assert same_color_temp(2700, 2703)
     assert not same_color_temp(2700, 2800)
+
+
+def test_offsets_stay_in_range() -> None:
+    """Large offsets never produce zero, negative or absurd temperatures."""
+    assert ColorTempOffset(100, "mired").remove(6500) == 10000
+    assert ColorTempOffset(-100, "mired").apply(10000) == 10000
+    assert ColorTempOffset(-2000, "K").apply(2700) == 1000
+    assert clamp(-300, None, None) == 1000

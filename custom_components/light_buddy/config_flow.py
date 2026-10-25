@@ -12,7 +12,7 @@ from homeassistant.config_entries import (
     OptionsFlowWithReload,
 )
 from homeassistant.core import callback
-from homeassistant.helpers import selector
+from homeassistant.helpers import entity_registry as er, selector
 
 from .const import (
     CONF_EXCLUDED_AREAS,
@@ -25,8 +25,15 @@ from .const import (
     UNIT_KELVIN,
     UNIT_MIRED,
 )
+from .membership import GROUP_PLATFORMS
 
-OFFSET_LIMITS = {UNIT_KELVIN: 3000, UNIT_MIRED: 300}
+# Larger shifts would leave the range of common lights, e.g. 2700 K plus 100
+# mired is about 2100 K.
+OFFSET_LIMITS = {UNIT_KELVIN: 2000, UNIT_MIRED: 100}
+LIMIT_PLACEHOLDERS = {
+    "max_kelvin": str(OFFSET_LIMITS[UNIT_KELVIN]),
+    "max_mired": str(OFFSET_LIMITS[UNIT_MIRED]),
+}
 
 
 class LightBuddyConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -55,6 +62,7 @@ class LightBuddyOptionsFlow(OptionsFlowWithReload):
     """Exclude areas or lights, and set color temperature offsets."""
 
     _light: str
+    _light_entity_id: str
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -97,14 +105,29 @@ class LightBuddyOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Choose the light to set an offset for."""
+        registry = er.async_get(self.hass)
+        errors: dict[str, str] = {}
         if user_input is not None:
-            self._light = user_input[CONF_LIGHT]
-            return await self.async_step_offset()
+            entry = registry.async_get(user_input[CONF_LIGHT])
+            if (
+                entry is None
+                or entry.platform == DOMAIN
+                or entry.platform in GROUP_PLATFORMS
+            ):
+                errors[CONF_LIGHT] = "invalid_light"
+            else:
+                # Stored by registry id, so a changed entity id keeps the offset.
+                self._light = entry.id
+                self._light_entity_id = entry.entity_id
+                return await self.async_step_offset()
 
         offsets = self.config_entry.options.get(CONF_OFFSETS, {})
         current = "\n".join(
-            f"- {entity_id}: {data[CONF_OFFSET_VALUE]:+g} {data[CONF_OFFSET_UNIT]}"
-            for entity_id, data in sorted(offsets.items())
+            sorted(
+                f"- {er.async_resolve_entity_id(registry, registry_id) or registry_id}:"
+                f" {data[CONF_OFFSET_VALUE]:+g} {data[CONF_OFFSET_UNIT]}"
+                for registry_id, data in offsets.items()
+            )
         )
         return self.async_show_form(
             step_id="offsets",
@@ -116,6 +139,7 @@ class LightBuddyOptionsFlow(OptionsFlowWithReload):
                 }
             ),
             description_placeholders={"offsets": current or "-"},
+            errors=errors,
         )
 
     async def async_step_offset(
@@ -166,6 +190,9 @@ class LightBuddyOptionsFlow(OptionsFlowWithReload):
             data_schema=self.add_suggested_values_to_schema(
                 schema, offsets.get(self._light, {})
             ),
-            description_placeholders={"light": self._light},
+            description_placeholders={
+                "light": self._light_entity_id,
+                **LIMIT_PLACEHOLDERS,
+            },
             errors=errors,
         )

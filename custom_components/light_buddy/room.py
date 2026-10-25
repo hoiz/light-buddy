@@ -1,6 +1,7 @@
 """Send commands to the lights of a room."""
 
 from collections.abc import Iterable, Mapping
+import logging
 from typing import Any
 
 from homeassistant.components.light import (
@@ -31,6 +32,8 @@ from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 
 from .offset import ColorTempOffset, clamp
+
+_LOGGER = logging.getLogger(__name__)
 
 COLOR_ATTRS = frozenset(
     {ATTR_HS_COLOR, ATTR_RGB_COLOR, ATTR_RGBW_COLOR, ATTR_RGBWW_COLOR, ATTR_XY_COLOR}
@@ -187,21 +190,30 @@ class RoomCommander:
             calls = [(members, params)] if members else []
         else:
             calls = async_split_turn_on(self.hass, members, params, self._offsets)
-            if ATTR_COLOR_TEMP_KELVIN in params:
-                for entity_ids, call_params in calls:
-                    for entity_id in entity_ids:
-                        self.sent_color_temps[entity_id] = (
-                            params[ATTR_COLOR_TEMP_KELVIN],
-                            call_params[ATTR_COLOR_TEMP_KELVIN],
-                        )
+
+        # One failing call must not keep the other lights from their command.
+        first_error: Exception | None = None
         for entity_ids, call_params in calls:
-            await self.hass.services.async_call(
-                LIGHT_DOMAIN,
-                service,
-                {**call_params, ATTR_ENTITY_ID: entity_ids},
-                blocking=True,
-                context=context,
-            )
+            try:
+                await self.hass.services.async_call(
+                    LIGHT_DOMAIN,
+                    service,
+                    {**call_params, ATTR_ENTITY_ID: entity_ids},
+                    blocking=True,
+                    context=context,
+                )
+            except Exception as err:
+                _LOGGER.warning("Sending %s to %s failed: %s", service, entity_ids, err)
+                first_error = first_error or err
+                continue
+            if ATTR_COLOR_TEMP_KELVIN in call_params:
+                for entity_id in entity_ids:
+                    self.sent_color_temps[entity_id] = (
+                        params[ATTR_COLOR_TEMP_KELVIN],
+                        call_params[ATTR_COLOR_TEMP_KELVIN],
+                    )
+        if first_error is not None:
+            raise first_error
 
 
 def turn_off_params(params: dict[str, Any]) -> dict[str, Any]:

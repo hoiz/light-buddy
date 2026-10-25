@@ -49,7 +49,7 @@ from .const import (
     MEMBERSHIP_DEBOUNCE_SECONDS,
 )
 from .membership import async_resolve_rooms
-from .offset import ColorTempOffset, offsets_from_options, same_color_temp
+from .offset import ColorTempOffset, async_resolve_offsets, same_color_temp
 from .room import RoomCommander, turn_off_params
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,7 +83,8 @@ class RoomManager:
         self.hass = hass
         self.entry = entry
         self._async_add_entities = async_add_entities
-        self._offsets = offsets_from_options(entry.options.get(CONF_OFFSETS, {}))
+        # Shared with all room lights, and updated when entity ids change.
+        self._offsets: dict[str, ColorTempOffset] = {}
         self._lights: dict[str, RoomLight] = {}
         self._debouncer = Debouncer(
             hass,
@@ -116,6 +117,10 @@ class RoomManager:
     @callback
     def async_refresh(self) -> None:
         """Add, update and remove room lights to match the areas."""
+        self._offsets.clear()
+        self._offsets.update(
+            async_resolve_offsets(self.hass, self.entry.options.get(CONF_OFFSETS, {}))
+        )
         rooms = async_resolve_rooms(
             self.hass,
             self.entry.options.get(CONF_EXCLUDED_AREAS, ()),
@@ -349,9 +354,6 @@ class RoomLight(LightEntity):
             ),
             None,
         )
-        self._attr_color_temp_kelvin = _mean(
-            self._requested_color_temp(state) for state in color_temp_states
-        )
         self._attr_color_mode = _room_color_mode(
             supported_modes, len(color_states), len(color_temp_states)
         )
@@ -371,6 +373,19 @@ class RoomLight(LightEntity):
                 if state.attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN)
             ),
             default=6500,
+        )
+        # Without its offset, a light at the edge of its range can be outside
+        # the range of the room.
+        color_temp = _mean(
+            self._requested_color_temp(state) for state in color_temp_states
+        )
+        self._attr_color_temp_kelvin = (
+            None
+            if color_temp is None
+            else min(
+                max(color_temp, self._attr_min_color_temp_kelvin),
+                self._attr_max_color_temp_kelvin,
+            )
         )
 
         features = LightEntityFeature(0)
@@ -402,6 +417,8 @@ class RoomLight(LightEntity):
             # The sent value may have been limited to the light's range.
             if same_color_temp(kelvin, sent_kelvin):
                 return requested
+            # The light was changed some other way since.
+            del self._commander.sent_color_temps[state.entity_id]
         if (offset := self._offsets.get(state.entity_id)) is not None:
             return offset.remove(kelvin)
         return kelvin

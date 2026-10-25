@@ -4,14 +4,17 @@ from collections.abc import Iterable
 from typing import Any
 
 from homeassistant.components.light import (
+    ATTR_COLOR_TEMP_KELVIN,
     ATTR_EFFECT,
     ATTR_EFFECT_LIST,
+    ATTR_FLASH,
     ATTR_HS_COLOR,
     ATTR_RGB_COLOR,
     ATTR_RGBW_COLOR,
     ATTR_RGBWW_COLOR,
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_TRANSITION,
+    ATTR_WHITE,
     ATTR_XY_COLOR,
     DOMAIN as LIGHT_DOMAIN,
     color_supported,
@@ -28,6 +31,7 @@ from homeassistant.helpers.event import async_call_later
 COLOR_ATTRS = frozenset(
     {ATTR_HS_COLOR, ATTR_RGB_COLOR, ATTR_RGBW_COLOR, ATTR_RGBWW_COLOR, ATTR_XY_COLOR}
 )
+COLOR_GROUP_ATTRS = COLOR_ATTRS | {ATTR_COLOR_TEMP_KELVIN, ATTR_WHITE}
 
 
 @callback
@@ -86,15 +90,8 @@ class RoomCommander:
     async def async_turn_off(
         self, members: list[str], params: dict[str, Any], context: Context | None
     ) -> None:
-        """Turn off the given lights, skipping those that already are off."""
-        members = [
-            entity_id
-            for entity_id in members
-            if (state := self.hass.states.get(entity_id)) is None
-            or state.state != STATE_OFF
-        ]
-        if members:
-            await self._async_submit(SERVICE_TURN_OFF, members, params, context)
+        """Turn off the given lights."""
+        await self._async_submit(SERVICE_TURN_OFF, members, params, context)
 
     @callback
     def async_cancel(self) -> None:
@@ -122,7 +119,15 @@ class RoomCommander:
             and service == SERVICE_TURN_ON
             and self._pending[0] == SERVICE_TURN_ON
         ):
-            params = {**self._pending[2], **params}
+            older = self._pending[2]
+            # Home Assistant accepts only one color descriptor per call.
+            if not COLOR_GROUP_ATTRS.isdisjoint(params):
+                older = {
+                    key: value
+                    for key, value in older.items()
+                    if key not in COLOR_GROUP_ATTRS
+                }
+            params = {**older, **params}
         self._pending = (service, members, params, context)
         if self._unsub_timer is None:
             self._unsub_timer = async_call_later(
@@ -146,7 +151,15 @@ class RoomCommander:
         context: Context | None,
     ) -> None:
         if service == SERVICE_TURN_OFF:
-            calls = [(members, params)]
+            # Checked when sending, so lights a pending turn_on just switched
+            # on are included.
+            members = [
+                entity_id
+                for entity_id in members
+                if (state := self.hass.states.get(entity_id)) is None
+                or state.state != STATE_OFF
+            ]
+            calls = [(members, params)] if members else []
         else:
             calls = async_split_turn_on(self.hass, members, params)
         for entity_ids, call_params in calls:
@@ -161,4 +174,8 @@ class RoomCommander:
 
 def turn_off_params(params: dict[str, Any]) -> dict[str, Any]:
     """Return the params that turn_off accepts."""
-    return {key: value for key, value in params.items() if key == ATTR_TRANSITION}
+    return {
+        key: value
+        for key, value in params.items()
+        if key in (ATTR_TRANSITION, ATTR_FLASH)
+    }

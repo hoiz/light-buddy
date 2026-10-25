@@ -132,7 +132,9 @@ class RoomManager:
                 self._lights.pop(registry_entry.unique_id, None)
                 entity_registry.async_remove(registry_entry.entity_id)
         for area_id in self._lights.keys() - rooms.keys():
-            self.hass.async_create_task(self._lights.pop(area_id).async_remove())
+            self.entry.async_create_task(
+                self.hass, _async_remove_light(self._lights.pop(area_id))
+            )
 
         new_lights: list[RoomLight] = []
         for area_id, members in rooms.items():
@@ -141,7 +143,7 @@ class RoomManager:
             if light is not None and light.area_name == name:
                 light.async_set_members(members)
                 continue
-            new_light = RoomLight(area_id, name, members, self._async_light_removed)
+            new_light = RoomLight(area_id, name, members)
             self._lights[area_id] = new_light
             if light is None:
                 new_lights.append(new_light)
@@ -155,19 +157,31 @@ class RoomManager:
             self._async_add_entities(new_lights)
 
     async def _async_replace(self, old: RoomLight, new: RoomLight) -> None:
-        await old.async_remove()
-        self._async_add_entities([new])
+        await _async_remove_light(old)
+        # A later refresh may have removed or replaced the room meanwhile.
+        if self._lights.get(new.area_id) is new:
+            self._async_add_entities([new])
 
-    @callback
-    def _async_light_removed(self, light: RoomLight) -> None:
-        if self._lights.get(light.area_id) is light:
-            del self._lights[light.area_id]
+
+async def _async_remove_light(light: RoomLight) -> None:
+    """Remove a room light, unless it never was added, e.g. while disabled."""
+    if light.hass is not None:
+        await light.async_remove()
+
+
+MEMBERSHIP_FIELDS = frozenset({"area_id", "device_id", "disabled_by"})
 
 
 @callback
 def _entity_event_filter(event_data: er.EventEntityRegistryUpdatedData) -> bool:
-    """Only light entities can change room membership."""
-    return event_data["entity_id"].startswith(f"{LIGHT_DOMAIN}.")
+    """Lights matter when they are added, removed, renamed or moved."""
+    if not event_data["entity_id"].startswith(f"{LIGHT_DOMAIN}."):
+        return False
+    if event_data["action"] != "update":
+        return True
+    return "old_entity_id" in event_data or not MEMBERSHIP_FIELDS.isdisjoint(
+        event_data["changes"]
+    )
 
 
 @callback
@@ -189,7 +203,6 @@ class RoomLight(LightEntity):
         area_id: str,
         name: str,
         members: list[str],
-        on_remove: Any,
     ) -> None:
         """Initialize the room light."""
         self.area_id = area_id
@@ -198,16 +211,10 @@ class RoomLight(LightEntity):
         self._attr_unique_id = area_id
         self._attr_translation_placeholders = {"area": name}
         self._members = members
-        self._removed_callback = on_remove
         self._unsub_members: CALLBACK_TYPE | None = None
         self._commander: RoomCommander | None = None
         self._attr_color_mode = ColorMode.ONOFF
         self._attr_supported_color_modes = {ColorMode.ONOFF}
-
-    @property
-    def members(self) -> list[str]:
-        """Return the lights of this room."""
-        return self._members
 
     @property
     @override
@@ -224,13 +231,16 @@ class RoomLight(LightEntity):
 
     @override
     async def async_will_remove_from_hass(self) -> None:
-        """Stop following the member lights."""
+        """Stop following the member lights.
+
+        The manager keeps this object: Home Assistant adds it again after its
+        entity id was changed.
+        """
         if self._unsub_members is not None:
             self._unsub_members()
             self._unsub_members = None
         if self._commander is not None:
             self._commander.async_cancel()
-        self._removed_callback(self)
 
     @callback
     def async_set_members(self, members: list[str]) -> None:

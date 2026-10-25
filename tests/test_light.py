@@ -141,9 +141,55 @@ async def test_turn_off_skips_off_lights(
     await setup_integration()
     calls = async_mock_service(hass, "light", "turn_off")
 
-    await _room(hass).async_turn_off(transition=2)
+    await _room(hass).async_turn_off(transition=2, flash="short")
 
-    assert [call.data for call in calls] == [{"entity_id": [on], "transition": 2}]
+    assert [call.data for call in calls] == [
+        {"entity_id": [on], "transition": 2, "flash": "short"}
+    ]
+
+
+async def test_turn_off_after_pending_turn_on(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A quick turn_off wins over a turn_on, even before the lights report on."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    await setup_integration()
+    on_calls = async_mock_service(hass, "light", "turn_on")
+    off_calls = async_mock_service(hass, "light", "turn_off")
+
+    room = _room(hass)
+    await room.async_turn_on(brightness=10)
+    await room.async_turn_on(brightness=20)
+    await room.async_turn_off()
+    assert len(on_calls) == 1
+    hass.states.async_set(lamp, STATE_ON, COLOR_LIGHT)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert len(on_calls) == 1
+    assert [call.data for call in off_calls] == [{"entity_id": [lamp]}]
+
+
+async def test_merged_commands_keep_one_color(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A newer color descriptor replaces an older pending one."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    await setup_integration()
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    room = _room(hass)
+    await room.async_turn_on(brightness=10)
+    await room.async_turn_on(brightness=20, hs_color=(120, 50))
+    await room.async_turn_on(color_temp_kelvin=3000)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert calls[-1].data == {
+        "entity_id": [lamp],
+        "brightness": 20,
+        "color_temp_kelvin": 3000,
+    }
 
 
 async def test_fast_commands_are_merged(
@@ -208,3 +254,40 @@ async def test_room_lights_do_not_include_each_other(
     er.async_get(hass).async_update_entity(ROOM, area_id="wohnzimmer")
     await _settle(hass)
     assert hass.states.get(ROOM).attributes["entity_id"] == [lamp]
+
+
+async def test_changed_entity_id_keeps_following_members(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """After the user changes the entity id, membership updates still apply."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    await setup_integration()
+
+    er.async_get(hass).async_update_entity(ROOM, new_entity_id="light.wohnzimmer_all")
+    await _settle(hass)
+    other = add_light("other", area="Wohnzimmer")
+    await _settle(hass)
+
+    state = hass.states.get("light.wohnzimmer_all")
+    assert state.attributes["entity_id"] == [lamp, other]
+    assert hass.states.get(ROOM) is None
+
+
+async def test_rename_area_of_disabled_room_light(
+    hass: HomeAssistant, add_light, setup_integration, caplog
+) -> None:
+    """Renaming the area of a disabled room light does not fail."""
+    add_light("lamp", area="Wohnzimmer")
+    entry = await setup_integration()
+    er.async_get(hass).async_update_entity(
+        ROOM, disabled_by=er.RegistryEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(ROOM) is None
+
+    ar.async_get(hass).async_update("wohnzimmer", name="Stube")
+    await _settle(hass)
+    assert "Traceback" not in caplog.text
+    assert hass.states.get(ROOM) is None

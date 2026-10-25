@@ -1,6 +1,7 @@
 """One light entity per area."""
 
 from collections import Counter
+from collections.abc import Mapping
 import logging
 from typing import Any, override
 
@@ -30,7 +31,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, State, callback
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
@@ -44,9 +45,11 @@ from .const import (
     COMMAND_INTERVAL_SECONDS,
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
+    CONF_OFFSETS,
     MEMBERSHIP_DEBOUNCE_SECONDS,
 )
 from .membership import async_resolve_rooms
+from .offset import ColorTempOffset, offsets_from_options, same_color_temp
 from .room import RoomCommander, turn_off_params
 
 _LOGGER = logging.getLogger(__name__)
@@ -80,6 +83,7 @@ class RoomManager:
         self.hass = hass
         self.entry = entry
         self._async_add_entities = async_add_entities
+        self._offsets = offsets_from_options(entry.options.get(CONF_OFFSETS, {}))
         self._lights: dict[str, RoomLight] = {}
         self._debouncer = Debouncer(
             hass,
@@ -143,7 +147,7 @@ class RoomManager:
             if light is not None and light.area_name == name:
                 light.async_set_members(members)
                 continue
-            new_light = RoomLight(area_id, name, members)
+            new_light = RoomLight(area_id, name, members, self._offsets)
             self._lights[area_id] = new_light
             if light is None:
                 new_lights.append(new_light)
@@ -203,6 +207,7 @@ class RoomLight(LightEntity):
         area_id: str,
         name: str,
         members: list[str],
+        offsets: Mapping[str, ColorTempOffset],
     ) -> None:
         """Initialize the room light."""
         self.area_id = area_id
@@ -211,6 +216,7 @@ class RoomLight(LightEntity):
         self._attr_unique_id = area_id
         self._attr_translation_placeholders = {"area": name}
         self._members = members
+        self._offsets = offsets
         self._unsub_members: CALLBACK_TYPE | None = None
         self._commander: RoomCommander | None = None
         self._attr_color_mode = ColorMode.ONOFF
@@ -225,7 +231,9 @@ class RoomLight(LightEntity):
     @override
     async def async_added_to_hass(self) -> None:
         """Start following the member lights."""
-        self._commander = RoomCommander(self.hass, COMMAND_INTERVAL_SECONDS)
+        self._commander = RoomCommander(
+            self.hass, COMMAND_INTERVAL_SECONDS, self._offsets
+        )
         self._async_subscribe_members()
         self._async_update_state()
 
@@ -342,7 +350,7 @@ class RoomLight(LightEntity):
             None,
         )
         self._attr_color_temp_kelvin = _mean(
-            state.attributes.get(ATTR_COLOR_TEMP_KELVIN) for state in color_temp_states
+            self._requested_color_temp(state) for state in color_temp_states
         )
         self._attr_color_mode = _room_color_mode(
             supported_modes, len(color_states), len(color_temp_states)
@@ -382,6 +390,21 @@ class RoomLight(LightEntity):
         self._attr_effect = (
             effect_counts.most_common(1)[0][0] if effect_counts else None
         )
+
+    def _requested_color_temp(self, state: State) -> float | None:
+        """Return the color temperature a light shows, without its offset."""
+        if (kelvin := state.attributes.get(ATTR_COLOR_TEMP_KELVIN)) is None:
+            return None
+        if self._commander is not None and (
+            sent := self._commander.sent_color_temps.get(state.entity_id)
+        ):
+            requested, sent_kelvin = sent
+            # The sent value may have been limited to the light's range.
+            if same_color_temp(kelvin, sent_kelvin):
+                return requested
+        if (offset := self._offsets.get(state.entity_id)) is not None:
+            return offset.remove(kelvin)
+        return kelvin
 
 
 def _mean(values: Any) -> int | None:

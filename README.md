@@ -4,7 +4,7 @@ Custom Integration für Home Assistant: **ein Licht pro Raum**, ohne Lichtgruppe
 
 Für jeden Bereich (Area) mit mindestens einer Lampe legt Light Buddy eine Licht-Entität an, z. B. `light.all_wohnzimmer` mit dem Namen „Alle Lichter in Wohnzimmer“ (auf Englisch „All lights in Wohnzimmer“). Sie schaltet und dimmt alle Lampen des Bereichs gemeinsam und funktioniert in einer normalen Dashboard-Kachel mit Helligkeitsregler.
 
-Geplant: Farbtemperatur-Offset pro Lampe, Farbtemperatur nach Tageszeit, Disco-Modus.
+Dazu kommt ein Farbtemperatur-Offset pro Lampe. Geplant: Farbtemperatur nach Tageszeit, Disco-Modus.
 
 ## Voraussetzungen
 
@@ -32,8 +32,19 @@ Wenn du eine Lampe verschiebst, einen Bereich anlegst oder umbenennst, passt sic
 
 Einstellungen → Geräte & Dienste → Light Buddy → **Konfigurieren**:
 
+**Räume**
+
 - **Ausgeschlossene Bereiche**: Für diese Bereiche gibt es kein Raum-Licht.
 - **Ausgeschlossene Lampen**: Diese Lampen gehören zu keinem Raum, z. B. Template-Lichter, die selbst andere Lampen steuern.
+
+**Farbtemperatur-Offsets**
+
+Für eine Lampe, die kälter oder wärmer wirkt als die anderen: Lampe wählen, dann Einheit und Offset eingeben. 0 entfernt den Offset.
+
+- **Kelvin**: Ein negativer Wert macht die Lampe wärmer. Bei -300 bekommt die Lampe 2700 K, wenn der Raum auf 3000 K gestellt wird.
+- **Mired**: Ein positiver Wert macht die Lampe wärmer. Ein Mired-Schritt wirkt über den ganzen Bereich gleich groß, deshalb passt ein Mired-Offset oft besser für warme und kalte Einstellungen zugleich.
+
+Der Offset wirkt nur, wenn die Farbtemperatur über ein Raum-Licht gesetzt wird. Steuerst du die Lampe direkt, bekommt sie den Wert ohne Offset. Der Zielwert wird auf den Bereich der Lampe begrenzt. Das Raum-Licht zeigt den gewünschten Wert an, nicht den verschobenen.
 
 ## Verhalten
 

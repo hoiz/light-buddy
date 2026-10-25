@@ -1,6 +1,6 @@
 """Send commands to the lights of a room."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from homeassistant.components.light import (
@@ -9,6 +9,8 @@ from homeassistant.components.light import (
     ATTR_EFFECT_LIST,
     ATTR_FLASH,
     ATTR_HS_COLOR,
+    ATTR_MAX_COLOR_TEMP_KELVIN,
+    ATTR_MIN_COLOR_TEMP_KELVIN,
     ATTR_RGB_COLOR,
     ATTR_RGBW_COLOR,
     ATTR_RGBWW_COLOR,
@@ -28,6 +30,8 @@ from homeassistant.const import (
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 
+from .offset import ColorTempOffset, clamp
+
 COLOR_ATTRS = frozenset(
     {ATTR_HS_COLOR, ATTR_RGB_COLOR, ATTR_RGBW_COLOR, ATTR_RGBWW_COLOR, ATTR_XY_COLOR}
 )
@@ -36,18 +40,30 @@ COLOR_GROUP_ATTRS = COLOR_ATTRS | {ATTR_COLOR_TEMP_KELVIN, ATTR_WHITE}
 
 @callback
 def async_split_turn_on(
-    hass: HomeAssistant, members: Iterable[str], params: dict[str, Any]
+    hass: HomeAssistant,
+    members: Iterable[str],
+    params: dict[str, Any],
+    offsets: Mapping[str, ColorTempOffset],
 ) -> list[tuple[list[str], dict[str, Any]]]:
     """Split turn_on params into as few calls as possible.
 
     Lights that receive identical params share one service call. Colors only go
     to lights that support color, because Home Assistant would otherwise turn a
-    color into some color temperature on white lights.
+    color into some color temperature on white lights. Lights with an offset
+    get their own color temperature.
     """
     calls: list[tuple[list[str], dict[str, Any]]] = []
     for entity_id in members:
         member_params = dict(params)
-        if (state := hass.states.get(entity_id)) is not None:
+        state = hass.states.get(entity_id)
+        if ATTR_COLOR_TEMP_KELVIN in params and (offset := offsets.get(entity_id)):
+            attributes = state.attributes if state is not None else {}
+            member_params[ATTR_COLOR_TEMP_KELVIN] = clamp(
+                offset.apply(params[ATTR_COLOR_TEMP_KELVIN]),
+                attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
+                attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
+            )
+        if state is not None:
             if not color_supported(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)):
                 for attr in COLOR_ATTRS:
                     member_params.pop(attr, None)
@@ -71,10 +87,19 @@ class RoomCommander:
     brightness slider, are merged and only the latest values are sent.
     """
 
-    def __init__(self, hass: HomeAssistant, interval: float) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        interval: float,
+        offsets: Mapping[str, ColorTempOffset],
+    ) -> None:
         """Initialize the commander."""
         self.hass = hass
         self._interval = interval
+        self._offsets = offsets
+        # Requested and sent color temperature of each light, to show the
+        # requested one while the light still reports what was sent.
+        self.sent_color_temps: dict[str, tuple[int, int]] = {}
         self._next_allowed = 0.0
         self._pending: tuple[str, list[str], dict[str, Any], Context | None] | None = (
             None
@@ -161,7 +186,14 @@ class RoomCommander:
             ]
             calls = [(members, params)] if members else []
         else:
-            calls = async_split_turn_on(self.hass, members, params)
+            calls = async_split_turn_on(self.hass, members, params, self._offsets)
+            if ATTR_COLOR_TEMP_KELVIN in params:
+                for entity_ids, call_params in calls:
+                    for entity_id in entity_ids:
+                        self.sent_color_temps[entity_id] = (
+                            params[ATTR_COLOR_TEMP_KELVIN],
+                            call_params[ATTR_COLOR_TEMP_KELVIN],
+                        )
         for entity_ids, call_params in calls:
             await self.hass.services.async_call(
                 LIGHT_DOMAIN,

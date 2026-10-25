@@ -291,3 +291,51 @@ async def test_rename_area_of_disabled_room_light(
     await _settle(hass)
     assert "Traceback" not in caplog.text
     assert hass.states.get(ROOM) is None
+
+
+async def test_offset_applies_and_is_hidden(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Offsets shift the sent color temperature, the room shows the requested one."""
+    plain = add_light("plain", area="Wohnzimmer", attributes=WHITE_LIGHT)
+    cold = add_light("cold", area="Wohnzimmer")
+    clamped = add_light("clamped", area="Wohnzimmer", attributes=COLOR_LIGHT)
+    await setup_integration(
+        {
+            "offsets": {
+                cold: {"value": -300, "unit": "K"},
+                clamped: {"value": -500, "unit": "K"},
+            }
+        }
+    )
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    await _room(hass).async_turn_on(color_temp_kelvin=2600, brightness=100)
+    assert [call.data for call in calls] == [
+        # 2100 K is below the light's minimum of 2200 K.
+        {"entity_id": [clamped], "color_temp_kelvin": 2200, "brightness": 100},
+        {"entity_id": [cold], "color_temp_kelvin": 2300, "brightness": 100},
+        {"entity_id": [plain], "color_temp_kelvin": 2600, "brightness": 100},
+    ]
+
+    on = {"color_mode": ColorMode.COLOR_TEMP, "brightness": 100}
+    hass.states.async_set(
+        plain, STATE_ON, {**WHITE_LIGHT, **on, "color_temp_kelvin": 2600}
+    )
+    hass.states.async_set(
+        cold, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 2304}
+    )
+    hass.states.async_set(
+        clamped, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 2200}
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(ROOM).attributes["color_temp_kelvin"] == 2600
+
+    # Changed elsewhere: the offset is taken out of the reported value.
+    hass.states.async_set(
+        cold, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 3700}
+    )
+    hass.states.async_set(plain, STATE_OFF, WHITE_LIGHT)
+    hass.states.async_set(clamped, STATE_OFF, COLOR_LIGHT)
+    await hass.async_block_till_done()
+    assert hass.states.get(ROOM).attributes["color_temp_kelvin"] == 4000

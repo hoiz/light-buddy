@@ -1,0 +1,14 @@
+{
+  "domain": "light_buddy",
+  "name": "Light Buddy",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/hoiz/light-buddy",
+  "integration_type": "helper",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/hoiz/light-buddy/issues",
+  "requirements": [],
+  "single_config_entry": true,
+  "version": "0.1.0"
+}

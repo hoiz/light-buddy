@@ -1,0 +1,210 @@
+"""Tests for the room light entity."""
+
+from datetime import timedelta
+
+from pytest_homeassistant_custom_component.common import (
+    async_fire_time_changed,
+    async_mock_service,
+)
+
+from custom_components.light_buddy.const import DOMAIN
+from homeassistant.components.light import DATA_COMPONENT, ColorMode, LightEntity
+from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.util import dt as dt_util
+
+from .conftest import COLOR_LIGHT, PLUG, WHITE_LIGHT
+
+ROOM = "light.all_wohnzimmer"
+
+
+def _room(hass: HomeAssistant, entity_id: str = ROOM) -> LightEntity:
+    """Return the room light entity.
+
+    Tests call it directly, because the mocked light services would also
+    replace the service call to the room light.
+    """
+    return hass.data[DATA_COMPONENT].get_entity(entity_id)
+
+
+async def _settle(hass: HomeAssistant) -> None:
+    """Let the membership debouncer run."""
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+
+
+async def test_state_follows_members(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """The room is on if any light is on and averages the on lights."""
+    color = add_light("color", area="Wohnzimmer")
+    white = add_light("white", area="Wohnzimmer", attributes=WHITE_LIGHT)
+    add_light("plug", area="Wohnzimmer", attributes=PLUG)
+    await setup_integration()
+
+    state = hass.states.get(ROOM)
+    assert state.state == STATE_OFF
+    assert state.name == "All lights in Wohnzimmer"
+    assert set(state.attributes["supported_color_modes"]) == {
+        ColorMode.HS,
+        ColorMode.COLOR_TEMP,
+    }
+    assert state.attributes["min_color_temp_kelvin"] == 2200
+    assert state.attributes["max_color_temp_kelvin"] == 6500
+
+    on = {"color_mode": ColorMode.COLOR_TEMP}
+    hass.states.async_set(
+        color,
+        STATE_ON,
+        {**COLOR_LIGHT, **on, "brightness": 100, "color_temp_kelvin": 2600},
+    )
+    hass.states.async_set(
+        white,
+        STATE_ON,
+        {**WHITE_LIGHT, **on, "brightness": 200, "color_temp_kelvin": 3000},
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get(ROOM)
+    assert state.state == STATE_ON
+    assert state.attributes["brightness"] == 150
+    assert state.attributes["color_temp_kelvin"] == 2800
+    assert state.attributes["color_mode"] == ColorMode.COLOR_TEMP
+
+    hass.states.async_set(
+        color,
+        STATE_ON,
+        {
+            **COLOR_LIGHT,
+            "color_mode": ColorMode.XY,
+            "brightness": 100,
+            "hs_color": (240, 100),
+        },
+    )
+    hass.states.async_set(white, STATE_OFF, WHITE_LIGHT)
+    await hass.async_block_till_done()
+    state = hass.states.get(ROOM)
+    assert state.attributes["color_mode"] == ColorMode.HS
+    assert state.attributes["hs_color"] == (240, 100)
+    assert state.attributes["brightness"] == 100
+
+
+async def test_only_brightness_and_onoff(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Rooms without color lights offer the best mode their lights have."""
+    plug = add_light("plug", area="Bad", attributes=PLUG)
+    add_light(
+        "dimmer",
+        area="Flur",
+        attributes={"supported_color_modes": [ColorMode.BRIGHTNESS]},
+    )
+    await setup_integration()
+
+    assert hass.states.get("light.all_bad").attributes["supported_color_modes"] == [
+        ColorMode.ONOFF
+    ]
+    assert hass.states.get("light.all_flur").attributes["supported_color_modes"] == [
+        ColorMode.BRIGHTNESS
+    ]
+
+    hass.states.async_set(plug, STATE_UNAVAILABLE)
+    await hass.async_block_till_done()
+    assert hass.states.get("light.all_bad").state == STATE_UNAVAILABLE
+
+
+async def test_turn_on_bundles_calls(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Lights with identical params share a call, colors skip white lights."""
+    color_a = add_light("color_a", area="Wohnzimmer")
+    color_b = add_light("color_b", area="Wohnzimmer")
+    white = add_light("white", area="Wohnzimmer", attributes=WHITE_LIGHT)
+    await setup_integration()
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    await _room(hass).async_turn_on(brightness=128, hs_color=(120, 50))
+
+    assert [call.data for call in calls] == [
+        {"entity_id": [color_a, color_b], "brightness": 128, "hs_color": (120, 50)},
+        {"entity_id": [white], "brightness": 128},
+    ]
+
+
+async def test_turn_off_skips_off_lights(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Only lights that are not off receive turn_off."""
+    add_light("off", area="Wohnzimmer")
+    on = add_light("on", area="Wohnzimmer", state=STATE_ON)
+    await setup_integration()
+    calls = async_mock_service(hass, "light", "turn_off")
+
+    await _room(hass).async_turn_off(transition=2)
+
+    assert [call.data for call in calls] == [{"entity_id": [on], "transition": 2}]
+
+
+async def test_fast_commands_are_merged(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Commands within the interval are merged, the latest value wins."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    await setup_integration()
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    room = _room(hass)
+    for brightness in (10, 20, 30):
+        await room.async_turn_on(brightness=brightness)
+    await room.async_turn_on(color_temp_kelvin=3000)
+    assert [call.data for call in calls] == [{"entity_id": [lamp], "brightness": 10}]
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert [call.data for call in calls][1:] == [
+        {"entity_id": [lamp], "brightness": 30, "color_temp_kelvin": 3000}
+    ]
+
+
+async def test_membership_follows_registry(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Moved lights, new areas and renamed areas apply without a restart."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    other = add_light("other", area="Wohnzimmer")
+    await setup_integration()
+    assert hass.states.get(ROOM).attributes["entity_id"] == [lamp, other]
+
+    kitchen = ar.async_get(hass).async_create("Küche")
+    er.async_get(hass).async_update_entity(lamp, area_id=kitchen.id)
+    await _settle(hass)
+    assert hass.states.get(ROOM).attributes["entity_id"] == [other]
+    assert hass.states.get("light.all_kuche").attributes["entity_id"] == [lamp]
+
+    # Membership changes also change which states the room follows.
+    hass.states.async_set(lamp, STATE_ON, COLOR_LIGHT)
+    await hass.async_block_till_done()
+    assert hass.states.get("light.all_kuche").state == STATE_ON
+    assert hass.states.get(ROOM).state == STATE_OFF
+
+    ar.async_get(hass).async_update(kitchen.id, name="Kochnische")
+    await _settle(hass)
+    assert hass.states.get("light.all_kuche").name == "All lights in Kochnische"
+
+    er.async_get(hass).async_update_entity(lamp, area_id=None)
+    await _settle(hass)
+    assert hass.states.get("light.all_kuche") is None
+    assert er.async_get(hass).async_get_entity_id("light", DOMAIN, kitchen.id) is None
+
+
+async def test_room_lights_do_not_include_each_other(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Moving a room light into an area does not make it a member."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    await setup_integration()
+
+    er.async_get(hass).async_update_entity(ROOM, area_id="wohnzimmer")
+    await _settle(hass)
+    assert hass.states.get(ROOM).attributes["entity_id"] == [lamp]

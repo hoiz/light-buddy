@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Light Buddy",
+        "description": "Creates one light for every area that contains lights, e.g. `light.all_living`. Lights belong to their own area, or to their device's area."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Light Buddy is already set up. Use the options to exclude areas or lights."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Light Buddy options",
+        "data": {
+          "excluded_areas": "Excluded areas",
+          "excluded_lights": "Excluded lights"
+        },
+        "data_description": {
+          "excluded_areas": "No room light is created for these areas.",
+          "excluded_lights": "These lights are never part of a room light, e.g. template lights that control other lights."
+        }
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "room": {
+        "name": "All lights in {area}"
+      }
+    }
+  }
+}

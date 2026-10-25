@@ -1,0 +1,109 @@
+"""Fixtures for Light Buddy tests."""
+
+from collections.abc import Callable
+from typing import Any
+
+import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.light_buddy.const import DOMAIN
+from homeassistant.components.light import ColorMode
+from homeassistant.const import STATE_OFF
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+)
+
+COLOR_LIGHT = {
+    "supported_color_modes": [ColorMode.COLOR_TEMP, ColorMode.XY],
+    "min_color_temp_kelvin": 2200,
+    "max_color_temp_kelvin": 4000,
+    "supported_features": 40,  # flash | transition
+}
+WHITE_LIGHT = {
+    "supported_color_modes": [ColorMode.COLOR_TEMP],
+    "min_color_temp_kelvin": 2700,
+    "max_color_temp_kelvin": 6500,
+    "supported_features": 40,
+}
+PLUG = {"supported_color_modes": [ColorMode.ONOFF], "supported_features": 0}
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
+    """Enable custom integrations in all tests."""
+
+
+@pytest.fixture
+def source_entry(hass: HomeAssistant) -> MockConfigEntry:
+    """Config entry that owns the devices of the member lights."""
+    entry = MockConfigEntry(domain="mqtt")
+    entry.add_to_hass(hass)
+    return entry
+
+
+@pytest.fixture
+def add_light(hass: HomeAssistant, source_entry: MockConfigEntry) -> Callable[..., str]:
+    """Register a light and give it a state."""
+
+    def _add_light(
+        object_id: str,
+        *,
+        area: str | None = None,
+        device_area: str | None = None,
+        platform: str = "mqtt",
+        attributes: dict[str, Any] | None = None,
+        state: str = STATE_OFF,
+        **registry_kwargs: Any,
+    ) -> str:
+        device_id = None
+        if device_area is not None:
+            device = dr.async_get(hass).async_get_or_create(
+                config_entry_id=source_entry.entry_id,
+                identifiers={("mqtt", object_id)},
+                name=object_id,
+            )
+            dr.async_get(hass).async_update_device(
+                device.id, area_id=_area_id(hass, device_area)
+            )
+            device_id = device.id
+        entry = er.async_get(hass).async_get_or_create(
+            "light",
+            platform,
+            object_id,
+            suggested_object_id=object_id,
+            device_id=device_id,
+            **registry_kwargs,
+        )
+        if area is not None:
+            er.async_get(hass).async_update_entity(
+                entry.entity_id, area_id=_area_id(hass, area)
+            )
+        hass.states.async_set(entry.entity_id, state, attributes or COLOR_LIGHT)
+        return entry.entity_id
+
+    return _add_light
+
+
+def _area_id(hass: HomeAssistant, name: str) -> str:
+    registry = ar.async_get(hass)
+    area = registry.async_get_area_by_name(name) or registry.async_create(name)
+    return area.id
+
+
+@pytest.fixture
+async def setup_integration(hass: HomeAssistant) -> Callable[..., Any]:
+    """Set up Light Buddy, optionally with options."""
+
+    async def _setup(options: dict[str, Any] | None = None) -> MockConfigEntry:
+        entry = MockConfigEntry(
+            domain=DOMAIN, title="Light Buddy", options=options or {}
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        return entry
+
+    return _setup

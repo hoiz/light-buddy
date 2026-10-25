@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Light Buddy",
+        "description": "Legt für jeden Bereich mit Lampen ein Licht an, z. B. `light.all_wohnzimmer`. Eine Lampe gehört zu ihrem eigenen Bereich oder, falls sie keinen hat, zum Bereich ihres Geräts."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Light Buddy ist bereits eingerichtet. Bereiche oder Lampen lassen sich in den Optionen ausschließen."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Light-Buddy-Optionen",
+        "data": {
+          "excluded_areas": "Ausgeschlossene Bereiche",
+          "excluded_lights": "Ausgeschlossene Lampen"
+        },
+        "data_description": {
+          "excluded_areas": "Für diese Bereiche wird kein Raum-Licht angelegt.",
+          "excluded_lights": "Diese Lampen gehören zu keinem Raum-Licht, z. B. Template-Lichter, die andere Lampen steuern."
+        }
+      }
+    }
+  },
+  "entity": {
+    "light": {
+      "room": {
+        "name": "Alle Lichter in {area}"
+      }
+    }
+  }
+}

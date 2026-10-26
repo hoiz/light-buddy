@@ -304,6 +304,9 @@ class RoomLight(LightEntity):
         right away, so they do not show their old color first.
         """
         assert self._commander is not None
+        turning_off = self._turning_off(self.hass.loop.time())
+        # A turn on ends an earlier fade out of ours.
+        self._turning_off_until = 0.0
         states = {
             entity_id: self.hass.states.get(entity_id) for entity_id in self._members
         }
@@ -313,7 +316,7 @@ class RoomLight(LightEntity):
             if state is None or state.state != STATE_ON
         ]
         members = self._members
-        if not kwargs and not self._turning_off(self.hass.loop.time()):
+        if not kwargs and not turning_off:
             # A bare turn on would not change lights that are on. Right after
             # turning off, they may still report on, though.
             members = off
@@ -423,9 +426,7 @@ class RoomLight(LightEntity):
             for state in states
         ]
         supports_color = any(color_supported(modes) for modes in member_modes)
-        supports_color_temp = any(
-            ColorMode.COLOR_TEMP in modes for modes in member_modes
-        )
+        supports_color_temp = any(color_temp_supported(modes) for modes in member_modes)
         # Every color capable member converts hs_color into its own color space,
         # so the room only needs to offer HS and color temperature.
         if supports_color or supports_color_temp:

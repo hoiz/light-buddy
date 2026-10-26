@@ -580,3 +580,22 @@ async def test_resume_forgets_lights_without_color_temp_shown(
 
     automation._async_clear_pause()
     assert lamp not in _room(hass)._commander.last_sent
+
+
+async def test_turning_on_ends_fade_out_window(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """After turning the room back on, colors set by hand count again."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    await _sent_target(hass, automation, lamp)
+    room = _room(hass)
+
+    await room.async_turn_off(transition=30)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    await room.async_turn_on()
+    hass.states.async_set(lamp, STATE_ON, _on(2700), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused

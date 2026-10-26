@@ -324,3 +324,59 @@ async def test_no_target_while_turning_off(
     await hass.data[DATA_COMPONENT].get_entity(ROOM).async_turn_off(transition=5)
     await _tick(hass)
     assert on_calls == []
+
+
+async def test_schedule_changes_apply_without_reload(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A new curve applies right away, and pauses go on."""
+    lamp = add_light(
+        "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 5000)
+    )
+    entry = await setup_integration(schedule=True)
+    automation = entry.runtime_data._automations["wohnzimmer"]
+    automation.async_mark_manual({"brightness"})
+    room = hass.data[DATA_COMPONENT].get_entity(ROOM)
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            "schedule": [
+                {"time": "00:00", "kelvin": 3000, "brightness": None, "weekdays": []}
+            ],
+        },
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(TARGET).state == "3000"
+    assert hass.data[DATA_COMPONENT].get_entity(ROOM) is room
+    assert automation.paused == {"brightness"}
+    assert hass.states.get(lamp).state == STATE_ON
+
+
+async def test_settings_apply_at_next_tick(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Threshold and transition settings change what the tick sends."""
+    add_light(
+        "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 4920)
+    )
+    entry = await setup_integration(schedule=True)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    # 80 K off: sent with the default threshold of 50 K.
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, "settings": {"threshold": 100, "transition": 4}},
+    )
+    await hass.async_block_till_done()
+    await _tick(hass)
+    assert calls == []
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, "settings": {"threshold": 50, "transition": 4}},
+    )
+    await hass.async_block_till_done()
+    await _tick(hass)
+    assert [call.data["transition"] for call in calls] == [4]

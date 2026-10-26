@@ -62,3 +62,25 @@ async def test_migrate_german_entity_ids(hass: HomeAssistant, add_light) -> None
     assert registry.async_get_entity_id(
         "number", DOMAIN, f"{taken_id}_color_temp_offset"
     ) == ("number.taken_farbtemperatur_offset")
+
+
+async def test_exclusions_reload_but_own_options_do_not(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Changed exclusions reload, options the entities write do not."""
+    from unittest.mock import patch
+
+    add_light("lamp", area="Wohnzimmer")
+    entry = await setup_integration()
+    with patch.object(hass.config_entries, "async_reload") as reload:
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, "schedules_off": ["wohnzimmer"]}
+        )
+        await hass.async_block_till_done()
+        assert not reload.called
+
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, "excluded_areas": ["wohnzimmer"]}
+        )
+        await hass.async_block_till_done()
+        assert reload.called

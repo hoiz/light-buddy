@@ -1,7 +1,8 @@
 """Send commands to the lights of a room."""
 
+import asyncio
 from collections import deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Container, Iterable, Mapping
 from dataclasses import dataclass
 import logging
 from typing import Any
@@ -37,6 +38,7 @@ from homeassistant.const import (
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 
+from .const import SEPARATE_COMMANDS_PAUSE_SECONDS
 from .offset import ColorTempOffset, clamp
 
 _LOGGER = logging.getLogger(__name__)
@@ -121,6 +123,40 @@ def async_split_turn_on(
     return calls
 
 
+def split_separate(
+    calls: list[tuple[list[str], dict[str, Any]]], separate: Container[str]
+) -> tuple[
+    list[tuple[list[str], dict[str, Any]]], list[tuple[list[str], dict[str, Any]]]
+]:
+    """Split calls with brightness and color for lights that need it.
+
+    Some lights, IKEA ones in particular, do not change brightness and color
+    together cleanly. They get the color first, so lights turning on show the
+    right color, and the brightness later. Returns the calls to send now and
+    the ones to send later.
+    """
+    now: list[tuple[list[str], dict[str, Any]]] = []
+    later: list[tuple[list[str], dict[str, Any]]] = []
+    for entity_ids, params in calls:
+        separated = [entity_id for entity_id in entity_ids if entity_id in separate]
+        if (
+            not separated
+            or ATTR_BRIGHTNESS not in params
+            or COLOR_GROUP_ATTRS.isdisjoint(params)
+        ):
+            now.append((entity_ids, params))
+            continue
+        if together := [e for e in entity_ids if e not in separate]:
+            now.append((together, params))
+        color = {key: value for key, value in params.items() if key != ATTR_BRIGHTNESS}
+        now.append((separated, color))
+        brightness = {ATTR_BRIGHTNESS: params[ATTR_BRIGHTNESS]}
+        if ATTR_TRANSITION in params:
+            brightness[ATTR_TRANSITION] = params[ATTR_TRANSITION]
+        later.append((separated, brightness))
+    return now, later
+
+
 def merge_params(older: dict[str, Any], newer: dict[str, Any]) -> dict[str, Any]:
     """Merge two turn_on params, the newer ones win."""
     # Home Assistant accepts only one color descriptor per call.
@@ -143,11 +179,17 @@ class RoomCommander:
         hass: HomeAssistant,
         interval: float,
         offsets: Mapping[str, ColorTempOffset],
+        separate: Container[str] = frozenset(),
     ) -> None:
-        """Initialize the commander."""
+        """Initialize the commander.
+
+        Lights in separate get brightness and color as separate commands.
+        """
         self.hass = hass
         self._interval = interval
         self._offsets = offsets
+        self._separate = separate
+        self._later: set[asyncio.Task[None]] = set()
         # Requested and sent color temperature of each light, to show the
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
@@ -249,6 +291,8 @@ class RoomCommander:
             self._unsub_timer()
             self._unsub_timer = None
         self._pending = None
+        for task in self._later:
+            task.cancel()
 
     async def _async_submit(
         self, service: str, member_params: MemberParams, context: Context | None
@@ -305,31 +349,74 @@ class RoomCommander:
         else:
             calls = async_split_turn_on(self.hass, member_params, self._offsets)
 
+        later: list[tuple[list[str], dict[str, Any]]] = []
+        if service == SERVICE_TURN_ON:
+            calls, later = split_separate(calls, self._separate)
+
         # One failing call must not keep the other lights from their command.
         first_error: Exception | None = None
         for entity_ids, call_params in calls:
-            try:
-                await self.hass.services.async_call(
-                    LIGHT_DOMAIN,
-                    service,
-                    {**call_params, ATTR_ENTITY_ID: entity_ids},
-                    blocking=True,
-                    context=context,
-                )
-            except Exception as err:
-                _LOGGER.warning("Sending %s to %s failed: %s", service, entity_ids, err)
-                first_error = first_error or err
-                continue
-            if service == SERVICE_TURN_ON:
-                self._async_remember_sent(entity_ids, call_params)
-            if ATTR_COLOR_TEMP_KELVIN in call_params:
-                for entity_id in entity_ids:
-                    self.sent_color_temps[entity_id] = (
-                        member_params[entity_id][ATTR_COLOR_TEMP_KELVIN],
-                        call_params[ATTR_COLOR_TEMP_KELVIN],
-                    )
+            error = await self._async_call(
+                service, entity_ids, call_params, member_params, context
+            )
+            first_error = first_error or error
+        if later:
+            # Not waited for, so the caller is not held up by the pause.
+            delay = (
+                max(params.get(ATTR_TRANSITION, 0) for _, params in later)
+                + SEPARATE_COMMANDS_PAUSE_SECONDS
+            )
+            task = self.hass.async_create_background_task(
+                self._async_send_later(later, delay, member_params, context),
+                "light_buddy_separate_commands",
+            )
+            self._later.add(task)
+            task.add_done_callback(self._later.discard)
         if first_error is not None:
             raise first_error
+
+    async def _async_send_later(
+        self,
+        calls: list[tuple[list[str], dict[str, Any]]],
+        delay: float,
+        member_params: MemberParams,
+        context: Context,
+    ) -> None:
+        await asyncio.sleep(delay)
+        for entity_ids, call_params in calls:
+            await self._async_call(
+                SERVICE_TURN_ON, entity_ids, call_params, member_params, context
+            )
+
+    async def _async_call(
+        self,
+        service: str,
+        entity_ids: list[str],
+        call_params: dict[str, Any],
+        member_params: MemberParams,
+        context: Context,
+    ) -> Exception | None:
+        """Send one service call and remember what it sent, or the error."""
+        try:
+            await self.hass.services.async_call(
+                LIGHT_DOMAIN,
+                service,
+                {**call_params, ATTR_ENTITY_ID: entity_ids},
+                blocking=True,
+                context=context,
+            )
+        except Exception as err:
+            _LOGGER.warning("Sending %s to %s failed: %s", service, entity_ids, err)
+            return err
+        if service == SERVICE_TURN_ON:
+            self._async_remember_sent(entity_ids, call_params)
+        if ATTR_COLOR_TEMP_KELVIN in call_params:
+            for entity_id in entity_ids:
+                self.sent_color_temps[entity_id] = (
+                    member_params[entity_id][ATTR_COLOR_TEMP_KELVIN],
+                    call_params[ATTR_COLOR_TEMP_KELVIN],
+                )
+        return None
 
     @callback
     def _async_remember_sent(

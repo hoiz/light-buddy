@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from custom_components.light_buddy.schedule import (
+    DASH,
     DEFAULT_SCHEDULE,
     SchedulePoint,
     Target,
@@ -118,3 +119,36 @@ def test_brightness_on_some_days_only() -> None:
     saturday = MONDAY + dt.timedelta(days=5)
     # Between Friday 20:00 and Monday 08:00.
     assert 40 < target_at(points, _at(12, 0, saturday)).brightness < 100
+
+
+def test_options_round_trip() -> None:
+    """Points survive storing, and are stored sorted by time."""
+    from custom_components.light_buddy.schedule import (
+        points_from_options,
+        points_to_options,
+    )
+
+    points = (
+        SchedulePoint(3000, dt.time(18, 0), brightness=40),
+        SchedulePoint(5000, dt.time(7, 0), weekdays=frozenset({0, 1, 2, 3, 4})),
+    )
+    stored = points_to_options(points)
+    assert [point["time"] for point in stored] == ["07:00", "18:00"]
+    assert set(points_from_options(stored)) == set(points)
+    assert points_from_options(None) == DEFAULT_SCHEDULE
+
+
+@pytest.mark.parametrize(
+    ("weekdays", "text"),
+    [
+        (None, "täglich"),
+        (frozenset({0, 1, 2, 3, 4}), f"Mo{DASH}Fr"),
+        (frozenset({5, 6}), "Sa, So"),
+        (frozenset({0, 1, 2, 4, 6}), f"Mo{DASH}Mi, Fr, So"),
+    ],
+)
+def test_format_weekdays(weekdays, text: str) -> None:
+    """Weekdays are shown short, with ranges."""
+    from custom_components.light_buddy.schedule import format_weekdays
+
+    assert format_weekdays(weekdays, "de") == text

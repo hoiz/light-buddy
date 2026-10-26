@@ -14,6 +14,14 @@
     "step": {
       "init": {
         "title": "Light-Buddy-Optionen",
+        "menu_options": {
+          "rooms": "Räume",
+          "schedule": "Zeitplan",
+          "settings": "Einstellungen"
+        }
+      },
+      "rooms": {
+        "title": "Räume",
         "data": {
           "excluded_areas": "Ausgeschlossene Bereiche",
           "excluded_lights": "Ausgeschlossene Lampen"
@@ -22,7 +30,69 @@
           "excluded_areas": "Für diese Bereiche wird kein Raum-Licht angelegt.",
           "excluded_lights": "Diese Lampen gehören zu keinem Raum-Licht, z. B. Template-Lichter, die andere Lampen steuern."
         }
+      },
+      "schedule": {
+        "title": "Zeitplan",
+        "description": "Die Farbtemperatur aller Räume folgt diesem Zeitplan. Zwischen zwei Punkten ändert sie sich gleitend, auch über Mitternacht.\n\n{points}\n\nÄnderungen werden mit **Speichern** übernommen.",
+        "menu_options": {
+          "add_point": "Punkt hinzufügen",
+          "edit_point": "Punkt bearbeiten",
+          "delete_points": "Punkte löschen",
+          "reset_schedule": "Auf Standard zurücksetzen",
+          "save_schedule": "Speichern"
+        }
+      },
+      "point": {
+        "title": "Punkt",
+        "data": {
+          "time": "Uhrzeit",
+          "kelvin": "Farbtemperatur",
+          "brightness": "Helligkeit",
+          "weekdays": "Wochentage"
+        },
+        "data_description": {
+          "brightness": "Leer lassen, damit die Helligkeit bleibt, wie sie ist.",
+          "weekdays": "Leer lassen für jeden Tag."
+        }
+      },
+      "edit_point": {
+        "title": "Punkt bearbeiten",
+        "data": {
+          "point": "Punkt"
+        }
+      },
+      "delete_points": {
+        "title": "Punkte löschen",
+        "data": {
+          "points": "Punkte"
+        }
+      },
+      "reset_schedule": {
+        "title": "Auf Standard zurücksetzen",
+        "description": "Ersetzt den Zeitplan durch den Standard, der dem Tageslicht folgt und um 12:30 am kältesten ist.",
+        "data": {
+          "confirm": "Zeitplan zurücksetzen"
+        }
+      },
+      "settings": {
+        "title": "Einstellungen",
+        "data": {
+          "threshold": "Kleinste Änderung",
+          "transition": "Übergang",
+          "auto_resume_minutes": "Fortsetzen nach",
+          "separate_commands": "Helligkeit und Farbe getrennt"
+        },
+        "data_description": {
+          "threshold": "Eingeschaltete Lampen bekommen erst eine neue Farbtemperatur, wenn der Zielwert mindestens so weit abweicht.",
+          "transition": "Für die Anpassungen des Zeitplans jede Minute. Kurz halten: IKEA-Lampen ignorieren während eines Übergangs andere Befehle, sogar das Ausschalten.",
+          "auto_resume_minutes": "Manuelle Änderungen enden nach dieser Zeit von selbst. 0 behält sie, bis der Raum aus ist.",
+          "separate_commands": "Manche Lampen, vor allem von IKEA, ändern Helligkeit und Farbe nicht sauber gleichzeitig. Sie bekommen dann zuerst die Farbe und eine halbe Sekunde später die Helligkeit."
+        }
       }
+    },
+    "error": {
+      "duplicate_point": "Zu dieser Uhrzeit gibt es an diesen Tagen schon einen Punkt.",
+      "keep_one_point": "Mindestens ein Punkt muss bleiben."
     }
   },
   "entity": {
@@ -81,6 +151,26 @@
     "button": {
       "resume_schedule": {
         "name": "Zeitplan fortsetzen {area}"
+      }
+    }
+  },
+  "selector": {
+    "weekdays": {
+      "options": {
+        "0": "Montag",
+        "1": "Dienstag",
+        "2": "Mittwoch",
+        "3": "Donnerstag",
+        "4": "Freitag",
+        "5": "Samstag",
+        "6": "Sonntag"
+      }
+    },
+    "separate_commands": {
+      "options": {
+        "off": "Aus",
+        "ikea": "Nur IKEA-Lampen",
+        "all": "Alle Lampen"
       }
     }
   }

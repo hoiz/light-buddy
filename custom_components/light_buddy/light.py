@@ -1,7 +1,7 @@
 """One light entity per area."""
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Container, Mapping
 import logging
 from typing import Any, override
 
@@ -113,8 +113,12 @@ class RoomLight(LightEntity):
         members: list[str],
         offsets: Mapping[str, ColorTempOffset],
         automation: RoomAutomation | None = None,
+        separate: Container[str] = frozenset(),
     ) -> None:
-        """Initialize the room light."""
+        """Initialize the room light.
+
+        Lights in separate get brightness and color as separate commands.
+        """
         self.area_id = area_id
         self.area_name = name
         self.entity_id = f"{LIGHT_DOMAIN}.all_{area_id}"
@@ -122,6 +126,7 @@ class RoomLight(LightEntity):
         self._attr_translation_placeholders = {"area": name}
         self._members = members
         self._offsets = offsets
+        self._separate = separate
         self._automation = automation
         # Lights turning on before this loop time may still be turning off.
         self._turning_off_until = 0.0
@@ -148,7 +153,7 @@ class RoomLight(LightEntity):
     async def async_added_to_hass(self) -> None:
         """Start following the member lights."""
         self._commander = RoomCommander(
-            self.hass, COMMAND_INTERVAL_SECONDS, self._offsets
+            self.hass, COMMAND_INTERVAL_SECONDS, self._offsets, self._separate
         )
         self._async_subscribe_members()
         self._async_update_state()

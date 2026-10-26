@@ -38,16 +38,20 @@ from homeassistant.helpers.target import (
     async_extract_referenced_entity_ids,
 )
 
-from .automation import RoomAutomation, manual_attributes
+from .automation import RoomAutomation, ScheduleSettings, manual_attributes
 from .const import (
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
     CONF_OFFSETS,
+    CONF_SCHEDULE,
     CONF_SCHEDULES_OFF,
     MEMBERSHIP_DEBOUNCE_SECONDS,
+    SEPARATE_ALL,
+    SEPARATE_IKEA,
 )
 from .membership import async_resolve_rooms
 from .offset import ColorTempOffset
+from .schedule import points_from_options
 
 if TYPE_CHECKING:
     from .entity import LightOffsetEntity, RoomEntity
@@ -84,6 +88,12 @@ class RoomManager:
         # Offsets per entity id of lights with offset settings. Shared with all
         # room lights, and updated when entity ids change.
         self.offsets: dict[str, ColorTempOffset] = {}
+        # Lights that get brightness and color as separate commands. Shared
+        # with all room lights, too.
+        self.separate_lights: set[str] = set()
+        self.points = points_from_options(entry.options.get(CONF_SCHEDULE))
+        self.settings = ScheduleSettings.from_options(entry.options)
+        self._exclusions = _exclusions(entry.options)
         self._lights: dict[str, RoomLight] = {}
         self._light_rooms: dict[str, str] = {}
         self._offset_light_ids: set[str] = set()
@@ -208,6 +218,7 @@ class RoomManager:
             if (offset := self.offset(registry_id)).value
         )
         self._offset_light_ids = {entry.entity_id for entry in offset_lights.values()}
+        self._async_update_separate_lights()
 
         self._async_remove_stale(entity_registry, rooms.keys(), offset_lights.keys())
         self._async_refresh_automations(rooms.keys())
@@ -265,8 +276,48 @@ class RoomManager:
                     area_id not in self.entry.options.get(CONF_SCHEDULES_OFF, ()),
                     self._async_store_schedule_enabled,
                 )
+                automation.async_set_points(self.points)
+                automation.async_set_settings(self.settings)
                 self._automations[area_id] = automation
                 automation.async_start()
+
+    def needs_reload(self, options: Mapping[str, Any]) -> bool:
+        """Return True if new options change which lights belong to rooms."""
+        return _exclusions(options) != self._exclusions
+
+    @callback
+    def async_apply_options(self) -> None:
+        """Follow a changed schedule and settings, without reloading."""
+        self.points = points_from_options(self.entry.options.get(CONF_SCHEDULE))
+        self.settings = ScheduleSettings.from_options(self.entry.options)
+        for automation in self._automations.values():
+            automation.async_set_points(self.points)
+            automation.async_set_settings(self.settings)
+        self._async_update_separate_lights()
+
+    @callback
+    def _async_update_separate_lights(self) -> None:
+        """Find the lights that get brightness and color separately."""
+        mode = self.settings.separate_commands
+        members = self._light_rooms.keys()
+        if mode == SEPARATE_ALL:
+            separate = set(members)
+        elif mode == SEPARATE_IKEA:
+            entity_registry = er.async_get(self.hass)
+            device_registry = dr.async_get(self.hass)
+            separate = {
+                entity_id
+                for entity_id in members
+                if (entry := entity_registry.async_get(entity_id)) is not None
+                and entry.device_id is not None
+                and (device := device_registry.async_get(entry.device_id)) is not None
+                and "ikea" in (device.manufacturer or "").lower()
+            }
+        else:
+            separate = set()
+        # Updated in place, the room lights share the set.
+        self.separate_lights.clear()
+        self.separate_lights.update(separate)
 
     @callback
     def _async_store_schedule_enabled(self, area_id: str, enabled: bool) -> None:
@@ -300,7 +351,12 @@ class RoomManager:
                 light.async_set_members(members)
                 continue
             new_light = RoomLight(
-                area_id, name, members, self.offsets, self._automations[area_id]
+                area_id,
+                name,
+                members,
+                self.offsets,
+                self._automations[area_id],
+                self.separate_lights,
             )
             self._lights[area_id] = new_light
             if light is None:
@@ -494,6 +550,14 @@ def _entity_event_filter(event_data: er.EventEntityRegistryUpdatedData) -> bool:
         return True
     return "old_entity_id" in event_data or not REFRESH_FIELDS.isdisjoint(
         event_data["changes"]
+    )
+
+
+def _exclusions(options: Mapping[str, Any]) -> tuple[set[str], set[str]]:
+    """Return the excluded areas and lights of options."""
+    return (
+        set(options.get(CONF_EXCLUDED_AREAS, ())),
+        set(options.get(CONF_EXCLUDED_LIGHTS, ())),
     )
 
 

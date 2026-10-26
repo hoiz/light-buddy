@@ -3,9 +3,12 @@
 Pure functions without Home Assistant state, so they can be tested directly.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import datetime as dt
+from typing import Any
+
+from .const import CONF_BRIGHTNESS, CONF_KELVIN, CONF_TIME, CONF_WEEKDAYS
 
 # Interpolating mireds looks even, interpolating Kelvin would not.
 MIRED = 1_000_000
@@ -151,3 +154,117 @@ def _interpolate(
     (start, start_value), (end, end_value) = previous, next_
     progress = (now - start) / (end - start)
     return start_value + progress * (end_value - start_value)
+
+
+def points_from_options(
+    data: Sequence[Mapping[str, Any]] | None,
+) -> tuple[SchedulePoint, ...]:
+    """Return the schedule stored in the options, or the default one."""
+    if not data:
+        return DEFAULT_SCHEDULE
+    return tuple(
+        SchedulePoint(
+            kelvin=int(point[CONF_KELVIN]),
+            time=dt.time.fromisoformat(point[CONF_TIME]),
+            brightness=point.get(CONF_BRIGHTNESS),
+            weekdays=frozenset(point[CONF_WEEKDAYS])
+            if point.get(CONF_WEEKDAYS)
+            else None,
+        )
+        for point in data
+    )
+
+
+def points_to_options(points: Sequence[SchedulePoint]) -> list[dict[str, Any]]:
+    """Return a schedule of clock time points for storing, sorted by time."""
+    return [
+        {
+            CONF_TIME: point.time.strftime("%H:%M"),
+            CONF_KELVIN: point.kelvin,
+            CONF_BRIGHTNESS: point.brightness,
+            CONF_WEEKDAYS: sorted(point.weekdays) if point.weekdays else [],
+        }
+        for point in sort_points(points)
+        if point.time is not None
+    ]
+
+
+def sort_points(points: Sequence[SchedulePoint]) -> list[SchedulePoint]:
+    """Return points by time, points for every day first."""
+    return sorted(
+        points,
+        key=lambda point: (
+            point.time or dt.time.min,
+            sorted(point.weekdays) if point.weekdays else [],
+        ),
+    )
+
+
+def same_slot(point: SchedulePoint, other: SchedulePoint) -> bool:
+    """Return True if two points are at the same time on a common day."""
+    if point.time != other.time:
+        return False
+    days = point.weekdays or ALL_WEEKDAYS
+    other_days = other.weekdays or ALL_WEEKDAYS
+    return not days.isdisjoint(other_days)
+
+
+ALL_WEEKDAYS = frozenset(range(7))
+# For ranges of days, and for no brightness.
+DASH = "\u2013"
+
+WEEKDAY_NAMES = {
+    "de": ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"),
+    "en": ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
+}
+EVERY_DAY = {"de": "täglich", "en": "every day"}
+
+
+def format_weekdays(weekdays: frozenset[int] | None, language: str) -> str:
+    """Return weekdays as short text, with ranges, e.g. "Mo-Fr, So"."""
+    names = WEEKDAY_NAMES.get(language, WEEKDAY_NAMES["en"])
+    if not weekdays or weekdays == ALL_WEEKDAYS:
+        return EVERY_DAY.get(language, EVERY_DAY["en"])
+    days = sorted(weekdays)
+    parts = []
+    start = previous = days[0]
+    for day in [*days[1:], None]:
+        if day is not None and day == previous + 1:
+            previous = day
+            continue
+        if previous - start >= 2:
+            parts.append(f"{names[start]}{DASH}{names[previous]}")
+        else:
+            parts.extend(names[number] for number in range(start, previous + 1))
+        if day is not None:
+            start = previous = day
+    return ", ".join(parts)
+
+
+def format_point(point: SchedulePoint, language: str) -> str:
+    """Return a point as one line, e.g. "06:30 · 3000 K · 40 % · Mo-Fr"."""
+    parts = [
+        point.time.strftime("%H:%M") if point.time else "",
+        f"{point.kelvin} K",
+    ]
+    if point.brightness is not None:
+        parts.append(f"{point.brightness} %")
+    parts.append(format_weekdays(point.weekdays, language))
+    return " · ".join(parts)
+
+
+def format_table(points: Sequence[SchedulePoint], language: str) -> str:
+    """Return the points as a Markdown table, for the options flow."""
+    header = {
+        "de": "| Uhrzeit | Farbtemperatur | Helligkeit | Tage |",
+        "en": "| Time | Color temperature | Brightness | Days |",
+    }.get(language, "| Time | Color temperature | Brightness | Days |")
+    rows = [header, "|---|---|---|---|"]
+    rows.extend(
+        f"| {point.time.strftime('%H:%M') if point.time else ''} "
+        f"| {point.kelvin} K "
+        f"| {DASH if point.brightness is None else f'{point.brightness} %'} "
+        f"| {format_weekdays(point.weekdays, language)} |"
+        for point in sort_points(points)
+    )
+    return "\n".join(rows)

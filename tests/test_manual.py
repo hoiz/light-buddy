@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
+from custom_components.light_buddy.automation import ScheduleSettings
 from custom_components.light_buddy.schedule import SchedulePoint
 from homeassistant.components.light import DATA_COMPONENT, ColorMode
 from homeassistant.const import STATE_OFF, STATE_ON
@@ -438,11 +439,10 @@ async def test_auto_resume(
     hass: HomeAssistant,
     add_light,
     setup_integration,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """With a timeout, the pause ends by itself and the target is applied."""
-    monkeypatch.setattr("custom_components.light_buddy.automation.AUTO_RESUME", 600)
     automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    automation.async_set_settings(ScheduleSettings(auto_resume_minutes=10))
     hass.states.async_set(lamp, STATE_ON, _on(2700, 30))
     await hass.async_block_till_done()
     automation.async_mark_manual({"color_temp"})

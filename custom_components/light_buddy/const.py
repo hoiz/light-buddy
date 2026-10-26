@@ -14,6 +14,25 @@ CONF_OFFSET_VALUE: Final = "value"
 # Areas whose schedule is turned off.
 CONF_SCHEDULES_OFF: Final = "schedules_off"
 
+# The one schedule for all rooms, a list of points.
+CONF_SCHEDULE: Final = "schedule"
+CONF_TIME: Final = "time"
+CONF_KELVIN: Final = "kelvin"
+CONF_BRIGHTNESS: Final = "brightness"
+CONF_WEEKDAYS: Final = "weekdays"
+
+# Global settings.
+CONF_SETTINGS: Final = "settings"
+CONF_THRESHOLD: Final = "threshold"
+CONF_TRANSITION: Final = "transition"
+CONF_AUTO_RESUME_MINUTES: Final = "auto_resume_minutes"
+CONF_SEPARATE_COMMANDS: Final = "separate_commands"
+
+# Which lights get brightness and color as separate commands.
+SEPARATE_OFF: Final = "off"
+SEPARATE_IKEA: Final = "ikea"
+SEPARATE_ALL: Final = "all"
+
 UNIT_KELVIN: Final = "K"
 UNIT_MIRED: Final = "mired"
 
@@ -27,11 +46,12 @@ COMMAND_INTERVAL_SECONDS: Final = 0.3
 SCHEDULE_INTERVAL: Final = timedelta(seconds=60)
 
 # Short transitions: IKEA lights ignore further commands, even turning off,
-# while a transition runs.
+# while a transition runs. The schedule's is a setting, this its default.
 TRANSITION_SCHEDULE: Final = 2
 TRANSITION_TURN_ON: Final = 1
 
-# Smaller changes of the target are not sent to lights that are on.
+# Smaller changes of the target are not sent to lights that are on. A
+# setting, this is its default.
 COLOR_TEMP_THRESHOLD_KELVIN: Final = 50
 BRIGHTNESS_THRESHOLD: Final = 5  # of 255, about 2 %
 
@@ -45,6 +65,6 @@ MANUAL_COLOR_TEMP_THRESHOLD_KELVIN: Final = 150
 MANUAL_BRIGHTNESS_THRESHOLD: Final = 13  # of 255, about 5 %
 TRANSITION_GRACE_SECONDS: Final = 2
 
-# Seconds after which a manual pause ends by itself, None to keep it until
-# the room is off.
-AUTO_RESUME: Final[float | None] = None
+# Between the color and the brightness command of lights that get them
+# separately, after the transition.
+SEPARATE_COMMANDS_PAUSE_SECONDS: Final = 0.5

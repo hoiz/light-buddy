@@ -25,7 +25,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: LightBuddyConfigEntry) -
     entry.runtime_data = RoomManager(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.runtime_data.async_setup()
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
+
+
+async def _async_options_updated(
+    hass: HomeAssistant, entry: LightBuddyConfigEntry
+) -> None:
+    """Apply changed options.
+
+    Changed exclusions change the rooms, which needs a reload. The schedule
+    and settings apply right away, without ending pauses. Offsets and
+    switches store their own options and are applied already.
+    """
+    manager = entry.runtime_data
+    if manager.needs_reload(entry.options):
+        await hass.config_entries.async_reload(entry.entry_id)
+    else:
+        manager.async_apply_options()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: LightBuddyConfigEntry) -> bool:

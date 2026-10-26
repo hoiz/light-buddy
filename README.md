@@ -85,6 +85,29 @@ So verhält sich der Zeitplan:
 - **Farbige Lampen:** Lampen, die gerade eine Farbe zeigen, lässt der Zeitplan ganz in Ruhe, auch bei der Helligkeit.
 - **Offsets:** Farbtemperatur-Offsets gelten auch für den Zeitplan.
 
+## Zeitplan bearbeiten
+
+Einstellungen → Geräte & Dienste → Light Buddy → **Konfigurieren** → **Zeitplan**. Der Zeitplan gilt für alle Räume.
+
+- Die Übersicht zeigt alle Punkte als Tabelle.
+- **Punkt hinzufügen** / **Punkt bearbeiten**: Uhrzeit, Farbtemperatur, optional Helligkeit und Wochentage. Ohne Wochentage gilt ein Punkt jeden Tag, so lässt sich z. B. am Wochenende ein späterer Morgen einstellen.
+- **Punkte löschen**: Mindestens ein Punkt muss bleiben.
+- **Auf Standard zurücksetzen**: die Tageslichtkurve von oben.
+- **Speichern** übernimmt alle Änderungen. Sie gelten sofort, ohne Neustart; laufende Pausen bleiben bestehen.
+
+Zwischen zwei Punkten ändert sich die Farbtemperatur gleichmäßig in Mired, so wie das Auge Farbtemperatur wahrnimmt. Eine Helligkeit wird nur zwischen Punkten übergeblendet, die eine haben.
+
+## Einstellungen
+
+Light Buddy → **Konfigurieren** → **Einstellungen**:
+
+| Einstellung | Standard | Bedeutung |
+|---|---|---|
+| Kleinste Änderung | 50 K | Eingeschaltete Lampen bekommen erst eine neue Farbtemperatur, wenn der Zielwert mindestens so weit abweicht. |
+| Übergang | 2 s | Für die Anpassungen jede Minute. IKEA-Lampen ignorieren während eines Übergangs andere Befehle, deshalb kurz halten. |
+| Fortsetzen nach | 0 (nie) | Manuelle Änderungen enden nach dieser Zeit von selbst. |
+| Helligkeit und Farbe getrennt | Aus | Für Lampen, die beides nicht sauber gleichzeitig ändern: zuerst die Farbe, eine halbe Sekunde nach dem Übergang die Helligkeit. „Nur IKEA-Lampen“ erkennt sie am Hersteller des Geräts. |
+
 ## Manuelle Änderungen
 
 Stellst du von Hand etwas ein, lässt der Zeitplan genau das im Raum in Ruhe:

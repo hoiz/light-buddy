@@ -109,7 +109,11 @@ async def setup_integration(
         are not affected by the time of day.
         """
         if not schedule:
+            # Without a target, the schedule does nothing.
             monkeypatch.setattr(RoomAutomation, "async_start", lambda self: None)
+            monkeypatch.setattr(
+                RoomAutomation, "_async_update_target", lambda self: None
+            )
         entry = MockConfigEntry(
             domain=DOMAIN, title="Light Buddy", options=options or {}
         )

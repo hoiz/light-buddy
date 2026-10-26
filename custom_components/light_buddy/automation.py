@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 import datetime as dt
 import hashlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -23,11 +24,16 @@ from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    AUTO_RESUME,
     COLOR_TEMP_THRESHOLD_KELVIN,
+    CONF_AUTO_RESUME_MINUTES,
+    CONF_SEPARATE_COMMANDS,
+    CONF_SETTINGS,
+    CONF_THRESHOLD,
+    CONF_TRANSITION,
     PAUSE_BRIGHTNESS,
     PAUSE_COLOR_TEMP,
     SCHEDULE_INTERVAL,
+    SEPARATE_OFF,
     TRANSITION_SCHEDULE,
     TRANSITION_TURN_ON,
 )
@@ -56,6 +62,37 @@ BRIGHTNESS_PARAMS = frozenset(
     }
 )
 COLOR_PARAMS = COLOR_GROUP_ATTRS | {ATTR_COLOR_NAME, ATTR_PROFILE}
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleSettings:
+    """The global settings of the schedule."""
+
+    # Smallest change of the target sent to lights that are on, in Kelvin.
+    threshold: float = COLOR_TEMP_THRESHOLD_KELVIN
+    # Seconds, for the schedule's regular updates.
+    transition: float = TRANSITION_SCHEDULE
+    # A pause ends by itself after this many minutes, 0 keeps it until the
+    # room is off.
+    auto_resume_minutes: float = 0
+    # Which lights get brightness and color as separate commands.
+    separate_commands: str = SEPARATE_OFF
+
+    @classmethod
+    def from_options(cls, options: Mapping[str, Any]) -> Self:
+        """Return the settings stored in the options, with defaults."""
+        data = options.get(CONF_SETTINGS) or {}
+        defaults = cls()
+        return cls(
+            threshold=data.get(CONF_THRESHOLD, defaults.threshold),
+            transition=data.get(CONF_TRANSITION, defaults.transition),
+            auto_resume_minutes=data.get(
+                CONF_AUTO_RESUME_MINUTES, defaults.auto_resume_minutes
+            ),
+            separate_commands=data.get(
+                CONF_SEPARATE_COMMANDS, defaults.separate_commands
+            ),
+        )
 
 
 def manual_attributes(params: Mapping[str, Any]) -> set[str]:
@@ -98,6 +135,7 @@ class RoomAutomation:
         self._store_enabled = store_enabled
         self._first_tick: asyncio.Task[None] | None = None
         self.points: tuple[SchedulePoint, ...] = DEFAULT_SCHEDULE
+        self.settings = ScheduleSettings()
         self.target: Target | None = None
         self._listeners: list[CALLBACK_TYPE] = []
         self._unsubs: list[CALLBACK_TYPE] = []
@@ -171,6 +209,12 @@ class RoomAutomation:
         self.points = tuple(points)
         self._async_update_target()
 
+    @callback
+    def async_set_settings(self, settings: ScheduleSettings) -> None:
+        """Use other settings from now on. A new auto resume applies to the
+        next pause."""
+        self.settings = settings
+
     async def async_set_enabled(self, enabled: bool) -> None:
         """Turn the schedule on or off, and apply it right away when on."""
         self.enabled = enabled
@@ -189,10 +233,12 @@ class RoomAutomation:
             self.paused_since = dt_util.utcnow()
         self._paused_at = self.hass.loop.time()
         self.paused |= attributes
-        if AUTO_RESUME is not None:
+        if self.settings.auto_resume_minutes:
             self._async_cancel_auto_resume()
             self._unsub_auto_resume = async_call_later(
-                self.hass, AUTO_RESUME, self._async_auto_resume
+                self.hass,
+                self.settings.auto_resume_minutes * 60,
+                self._async_auto_resume,
             )
         self._async_notify()
 
@@ -265,7 +311,7 @@ class RoomAutomation:
 
     async def _async_apply(
         self,
-        transition: float = TRANSITION_SCHEDULE,
+        transition: float | None = None,
         members: list[str] | None = None,
     ) -> None:
         if self.active and (light := self.light) is not None:
@@ -273,9 +319,9 @@ class RoomAutomation:
             try:
                 await light.async_apply_target(
                     self.target,
-                    transition,
+                    self.settings.transition if transition is None else transition,
                     members=members,
-                    threshold=COLOR_TEMP_THRESHOLD_KELVIN,
+                    threshold=self.settings.threshold,
                     paused=frozenset(self.paused),
                 )
             except Exception:

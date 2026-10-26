@@ -32,7 +32,7 @@ Settings → Devices & services → Add integration → **Light Buddy**. There i
 
 When you move a light, or add or rename an area, Light Buddy follows without a restart. Areas without lights lose their room light.
 
-## Options
+## Exclusions
 
 Settings → Devices & services → Light Buddy → **Configure** → **Exclusions**:
 
@@ -89,7 +89,7 @@ How the schedule behaves:
 - **Colored lights:** lights that currently show a color are left alone.
 - **Brightness:** the schedule only changes the color temperature. The brightness is up to you.
 - **Offsets:** color temperature offsets apply to the schedule, too.
-- **Range:** a light that cannot reach the target gets the closest value it supports, e.g. 2900 K for an Elgato Key Light when the target is 2200 K.
+- **Range:** a light that cannot reach the target gets the closest value it supports, e.g. 2900 K for an Elgato Key Light when the warmest value is set to 2700 K.
 
 ## Settings
 

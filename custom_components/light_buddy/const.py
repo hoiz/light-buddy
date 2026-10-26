@@ -63,8 +63,8 @@ SEPARATE_COMMANDS_PAUSE_SECONDS: Final = 0.5
 
 # Seconds between two colors of the disco mode, and its palette. Settings,
 # these are their defaults. Each step sends one call per color.
-DISCO_INTERVAL: Final = 10
-DISCO_MIN_INTERVAL: Final = 3
+DISCO_INTERVAL: Final = 4
+DISCO_MIN_INTERVAL: Final = 2
 DISCO_PALETTE: Final = "rainbow"
 
 # The schedule's warmest and coldest color temperature. Settings, these are

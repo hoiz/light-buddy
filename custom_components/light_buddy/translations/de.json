@@ -49,7 +49,7 @@
           "transition": "Für die Anpassungen des Zeitplans jede Minute. Kurz halten: IKEA-Lampen ignorieren während eines Übergangs andere Befehle, sogar das Ausschalten.",
           "auto_resume_minutes": "Nach einer manuellen Änderung schaltet sich der Zeitplan-Schalter des Raums nach dieser Zeit von selbst wieder ein. 0 wartet, bis der Raum aus ist.",
           "separate_commands": "Manche Lampen, vor allem von IKEA, ändern Helligkeit und Farbtemperatur nicht sauber gleichzeitig, z. B. beim Einschalten eines Raums mit einer Helligkeit. Sie bekommen dann zuerst die Farbtemperatur und eine halbe Sekunde später die Helligkeit.",
-          "disco_interval": "Sekunden bis zur nächsten Farbe. Jede Farbe blendet fast über die ganze Zeit ein, so fließen die Lampen von Farbe zu Farbe. Jeder Wechsel sendet einen Befehl pro Farbe, sehr kurze Zeiten belasten also das Zigbee-Netz.",
+          "disco_interval": "Sekunden bis zur nächsten Farbe. Jeder Farbwechsel sendet einen Befehl pro Farbe, sehr kurze Zeiten belasten also das Zigbee-Netz.",
           "disco_palette": "Die Farben, durch die der Disco-Modus wechselt. Jede Lampe zeigt eine andere."
         },
         "description": "![Kurve]({chart})\n\nDer Zeitplan folgt der Sonne: am wärmsten vom späten Abend bis zum Sonnenaufgang (nicht vor 06:00, nicht nach 07:30), am kältesten zum Sonnenhöchststand. Die Kurve zeigt die gespeicherten Werte für heute, dünne Linien den längsten und den kürzesten Tag."

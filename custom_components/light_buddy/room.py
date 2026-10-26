@@ -307,19 +307,10 @@ class RoomCommander:
         """
         await self._async_send(SERVICE_TURN_ON, member_params, Context())
 
-    async def async_turn_off_now(
-        self, members: Iterable[str], *, even_if_off: bool = False
-    ) -> None:
-        """Turn off lights at once, apart from throttling, like async_send_now.
-
-        Even if off, also lights reported off, e.g. by lights that ignored the
-        command before while fading.
-        """
+    async def async_turn_off_now(self, members: Iterable[str]) -> None:
+        """Turn off lights at once, apart from throttling, like async_send_now."""
         await self._async_send(
-            SERVICE_TURN_OFF,
-            {entity_id: {} for entity_id in members},
-            Context(),
-            even_if_off=even_if_off,
+            SERVICE_TURN_OFF, {entity_id: {} for entity_id in members}, Context()
         )
 
     @callback
@@ -367,12 +358,7 @@ class RoomCommander:
         await self._async_send(service, member_params, context)
 
     async def _async_send(
-        self,
-        service: str,
-        member_params: MemberParams,
-        context: Context | None,
-        *,
-        even_if_off: bool = False,
+        self, service: str, member_params: MemberParams, context: Context | None
     ) -> None:
         if context is None:
             context = Context()
@@ -403,8 +389,7 @@ class RoomCommander:
             members = [
                 entity_id
                 for entity_id in member_params
-                if even_if_off
-                or (state := self.hass.states.get(entity_id)) is None
+                if (state := self.hass.states.get(entity_id)) is None
                 or state.state != STATE_OFF
             ]
             params = next(iter(member_params.values()), {})

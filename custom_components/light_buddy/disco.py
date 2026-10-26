@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Coroutine, Mapping, Sequence
 from dataclasses import dataclass
 import datetime as dt
 import logging
@@ -32,11 +32,9 @@ _LOGGER = logging.getLogger(__name__)
 # A room turning off this soon after disco started may be lights switching
 # over, white ones turning off before the colored ones report on.
 START_GRACE_SECONDS = 5
-# Each color fades in until this long before the next step, so the lights
-# change slowly and their small delays do not show.
-FADE_GAP_SECONDS = 1
-# IKEA lights ignore commands during a transition: commands during a fade go
-# out once more this long after it ended.
+# The fade into each color. IKEA lights ignore commands during a transition,
+# so it is kept short, and waited for before disco ends.
+DISCO_FADE_SECONDS = 1
 FADE_PAUSE_SECONDS = 0.5
 
 type HsColor = tuple[float, float]
@@ -75,16 +73,6 @@ class DiscoSettings:
             interval=data.get(CONF_DISCO_INTERVAL, defaults.interval),
             palette=palette if palette in PALETTES else defaults.palette,
         )
-
-
-@dataclass(slots=True)
-class Repeat:
-    """A command waiting to be sent again, for lights not changed since.
-
-    Whether it turns each light on.
-    """
-
-    goals: dict[str, bool]
 
 
 def step_colors(
@@ -138,13 +126,6 @@ class RoomDisco:
         self._generation = 0
         self._stopping_snapshot: dict[str, dict[str, Any] | None] = {}
         self._stopping_switched: set[str] = set()
-        # Commands sent again once the fade is over, waiting or being sent.
-        self._repeat_timers: dict[CALLBACK_TYPE, Repeat] = {}
-        self._repeats: set[asyncio.Task[None]] = set()
-        # What the last restore brought back, while it is sent again.
-        self._last_restore: tuple[dict[str, dict[str, Any] | None], set[str]] | None = (
-            None
-        )
 
     @property
     def starting(self) -> bool:
@@ -158,74 +139,6 @@ class RoomDisco:
             and self.hass.loop.time() - self._started_at < START_GRACE_SECONDS
         )
 
-    @property
-    def fading(self) -> bool:
-        """Return True while lights fade into a color of disco."""
-        return self.hass.loop.time() < self._fading_until
-
-    @property
-    def settling(self) -> bool:
-        """Return True while commands wait to be sent again after a fade.
-
-        Lights may report colors of disco until then.
-        """
-        return bool(self._repeat_timers or self._repeats)
-
-    @callback
-    def async_after_fade(
-        self,
-        send: Callable[[list[str]], Coroutine[Any, Any, None]],
-        goals: Mapping[str, bool],
-    ) -> None:
-        """Send a command once more after the running fade, if any.
-
-        For lights that ignore commands while fading, like IKEA ones. Goals
-        tell for each light whether the command turns it on; send gets the
-        lights still to repeat it for.
-        """
-        if not self.fading:
-            return
-        delay = self._fading_until - self.hass.loop.time() + FADE_PAUSE_SECONDS
-        repeat = Repeat(dict(goals))
-
-        @callback
-        def _async_repeat(_now: dt.datetime) -> None:
-            self._repeat_timers.pop(unsub, None)
-            if not repeat.goals:
-                return
-            task = self._automation.async_track(
-                self._async_send(send(list(repeat.goals)))
-            )
-            self._repeats.add(task)
-            task.add_done_callback(self._repeats.discard)
-
-        unsub = async_call_later(self.hass, delay, _async_repeat)
-        self._repeat_timers[unsub] = repeat
-
-    @callback
-    def async_drop_from_repeats(self, entity_id: str, on: bool | None = None) -> None:
-        """Leave a light changed by others out of commands waiting to repeat.
-
-        With on, only if it went against the command, as lights also report
-        our own commands late, without our context.
-        """
-        for repeat in self._repeat_timers.values():
-            if entity_id in repeat.goals and (
-                on is None or repeat.goals[entity_id] != on
-            ):
-                del repeat.goals[entity_id]
-
-    @callback
-    def async_cancel_repeats(self) -> None:
-        """Drop commands waiting to be sent again, e.g. for a newer one."""
-        for unsub in list(self._repeat_timers):
-            unsub()
-        self._repeat_timers.clear()
-        for task in list(self._repeats):
-            task.cancel()
-        self._repeats.clear()
-        self._last_restore = None
-
     async def async_start(self) -> None:
         """Start changing colors, after taking what the lights show.
 
@@ -234,10 +147,6 @@ class RoomDisco:
         """
         snapshot: dict[str, dict[str, Any] | None] | None = None
         switched: set[str] = set()
-        if self._last_restore is not None and self.settling:
-            # Restored, but the lights may still show disco.
-            snapshot, switched = self._last_restore
-        self.async_cancel_repeats()
         if (stopping := self._stopping) is not None:
             if self._restore:
                 snapshot, switched = self._stopping_snapshot, self._stopping_switched
@@ -247,7 +156,6 @@ class RoomDisco:
             # Stopped again meanwhile, or unloaded: the latest wins.
             if self._generation != generation:
                 return
-            self.async_cancel_repeats()
         if self.running:
             return
         if (light := self._automation.light) is None or not (
@@ -278,9 +186,9 @@ class RoomDisco:
     async def async_stop(self, *, restore: bool) -> None:
         """Stop changing colors, and restore what the lights showed before.
 
-        Commands still being sent are cancelled. The restore goes out at once,
-        and once more after a fade still running. A stop without restore, e.g.
-        turning the room off, drops a restore still waiting.
+        Commands still being sent are cancelled, and a fade still running is
+        waited for, as IKEA lights ignore commands during it. A stop without
+        restore, e.g. turning the room off, drops a restore still waiting.
         """
         # A start waiting for a stop gives up.
         self._generation += 1
@@ -310,35 +218,17 @@ class RoomDisco:
             if task is not None:
                 task.cancel()
                 await asyncio.wait([task])
-            # Commands from before the stop must not follow its restore.
-            self.async_cancel_repeats()
+            if (delay := self._fading_until - self.hass.loop.time()) > 0:
+                await asyncio.sleep(delay + FADE_PAUSE_SECONDS)
             if (
                 self._restore
                 and not self._resumed
                 and (light := self._automation.light) is not None
             ):
-                snapshot = self._restorable(self._stopping_snapshot)
-                color_temp = self._restored_color_temp()
-                last_restore = (self._stopping_snapshot, self._stopping_switched)
-                await light.async_restore(snapshot, color_temp)
-                # Turned on again while the restore went out: disco goes on.
-                if not self._resumed and self._restore:
-                    self.async_after_fade(
-                        lambda entity_ids: light.async_restore(
-                            {
-                                entity_id: snapshot[entity_id]
-                                for entity_id in entity_ids
-                            },
-                            color_temp,
-                            repeat=True,
-                        ),
-                        {
-                            entity_id: params is not None
-                            for entity_id, params in snapshot.items()
-                        },
-                    )
-                    if self.settling:
-                        self._last_restore = last_restore
+                await light.async_restore(
+                    self._restorable(self._stopping_snapshot),
+                    self._restored_color_temp(),
+                )
         finally:
             self._stopping = None
             self._resumed = False
@@ -396,7 +286,6 @@ class RoomDisco:
             if task is not None:
                 task.cancel()
         self._task = self._stopping = None
-        self.async_cancel_repeats()
         self._snapshot = {}
 
     def _restored_color_temp(self) -> float | None:
@@ -442,9 +331,9 @@ class RoomDisco:
                 self._async_begin_stop()
             return
         self._step += 1
-        transition = max(self.settings.interval - FADE_GAP_SECONDS, 0)
-        # A fade still running from before, e.g. a longer interval, counts too.
-        self._fading_until = max(self._fading_until, self.hass.loop.time() + transition)
+        # Short, so lights are rarely busy fading when other commands come.
+        transition = min(DISCO_FADE_SECONDS, self.settings.interval)
+        self._fading_until = self.hass.loop.time() + transition
         await self._async_send(
             light.async_disco_step(
                 step_colors(self._lights, PALETTES[self.settings.palette], self._step),
@@ -452,7 +341,7 @@ class RoomDisco:
             )
         )
         # Lights slow to answer delay the later calls, and their fades.
-        self._fading_until = max(self._fading_until, self.hass.loop.time() + transition)
+        self._fading_until = self.hass.loop.time() + transition
 
     async def _async_send(self, coro: Coroutine[Any, Any, None]) -> None:
         try:

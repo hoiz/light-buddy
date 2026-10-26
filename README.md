@@ -127,7 +127,7 @@ Turning it on yourself applies the schedule again right away.
 
 Every room has a **Disco** switch (`switch.disco_<area>`). While it is on:
 
-- **Colored lights** flow through a palette, each light showing a different color. Each color fades in slowly, almost until the next one, so the lights change in a continuous flow. Zigbee lights never change exactly together; the long fades hide that. Lights that were off turn on with the room's brightness, or at full brightness if the room was off.
+- **Colored lights** cycle through a palette, each light showing a different color. Lights that were off turn on with the room's brightness, or at full brightness if the room was off.
 - **White lights** (and other lights without color) turn off.
 - **Brightness** can still be changed through the room light; it only reaches the colored lights.
 - **The schedule** waits and sends nothing.
@@ -139,7 +139,7 @@ Disco also ends:
 - when the room is turned off; the lights stay off;
 - when you set a color or color temperature through the room light; the lights keep it, and the Schedule switch turns off as for any manual change.
 
-Turning disco off, turning the room off, or changing the brightness or color during disco goes out at once, and once more when the running fade is over: IKEA lights ignore commands while fading. Lights switched on or off by hand during disco, against what disco did with them, keep that: a white light turned on at the wall stays on.
+Turning disco off waits for a running fade to finish, at most about 1.5 s. Lights switched on or off by hand during disco, against what disco did with them, keep that: a white light turned on at the wall stays on.
 
 After a restart of Home Assistant, or a reload of Light Buddy, disco is off and the lights stay as they are.
 
@@ -147,7 +147,7 @@ Speed and palette are set for all rooms under **Configure** → **Settings**:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Disco speed | 10 s | Seconds until the next color, between 3 and 60. Each color fades in over this time less 1 s. Every change sends one command per color, so very short times load the Zigbee network. |
+| Disco speed | 4 s | Seconds until the next color, between 2 and 60. Each color fades in over 1 s, kept short because IKEA lights ignore commands while fading. Every change sends one command per color, so very short times load the Zigbee network. |
 | Disco palette | Rainbow | Rainbow, Party, Fire or Ocean. |
 
 ## Behavior

@@ -57,6 +57,7 @@ from .schedule import (
     points_to_options,
     same_slot,
     sort_points,
+    today_times,
 )
 
 CONF_POINT = "point"
@@ -396,13 +397,13 @@ class LightBuddyOptionsFlow(OptionsFlow):
     def _point_selector(self, *, multiple: bool) -> selector.SelectSelector:
         """Return a selector of the schedule's points."""
         language = self.hass.config.language
-        now, sun = dt_util.now(), hass_sun(self.hass)
+        times = today_times(self.points, dt_util.now(), hass_sun(self.hass))
         return selector.SelectSelector(
             selector.SelectSelectorConfig(
                 options=[
                     selector.SelectOptionDict(
                         value=str(index),
-                        label=format_point(point, language, now, sun),
+                        label=format_point(point, language, times.get(point)),
                     )
                     for index, point in enumerate(self.points)
                 ],

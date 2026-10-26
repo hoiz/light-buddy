@@ -42,6 +42,10 @@ NOMINAL_SUN_TIMES = {
     SUNSET: dt.time(18, 0),
 }
 
+# Points of the same sun event stay this far apart, or as far as their
+# offsets, if a window pulls one of them towards the next.
+MIN_SAME_EVENT_GAP_MINUTES = 30
+
 # Points along a segment checked for the sun rising or setting throughout.
 MONOTONIC_CHECKS = 8
 
@@ -209,9 +213,16 @@ def day_times(
             (point for point in times if point.sun_event == event),
             key=lambda point: point.offset_minutes,
         )
-        # From the largest offset back, no point after the next one.
+        # From the largest offset back, each point at least a little before
+        # the next one, so the change between them does not become a jump.
         for following, point in itertools.pairwise(reversed(same_event)):
-            times[point] = min(times[point], times[following])
+            gap = dt.timedelta(
+                minutes=min(
+                    MIN_SAME_EVENT_GAP_MINUTES,
+                    following.offset_minutes - point.offset_minutes,
+                )
+            )
+            times[point] = min(times[point], times[following] - gap)
     return [(when, point) for point, when in times.items()]
 
 
@@ -354,13 +365,10 @@ def sort_points(
     Points for every day first.
     """
 
+    times = today_times(points, today, sun)
+
     def when(point: SchedulePoint) -> dt.time:
-        if (
-            today is not None
-            and today.tzinfo is not None
-            and (moment := point_time(point, today.date(), today.tzinfo, sun))
-            is not None
-        ):
+        if (moment := times.get(point)) is not None:
             return moment.time()
         return nominal_time(point)
 
@@ -371,6 +379,18 @@ def sort_points(
             sorted(point.weekdays) if point.weekdays else [],
         ),
     )
+
+
+def today_times(
+    points: Sequence[SchedulePoint], today: dt.datetime | None, sun: Sun | None
+) -> dict[SchedulePoint, dt.datetime]:
+    """Return when the points of today happen, as the schedule uses them."""
+    if today is None or today.tzinfo is None:
+        return {}
+    return {
+        point: when
+        for when, point in day_times(points, today.date(), today.tzinfo, sun)
+    }
 
 
 def same_slot(point: SchedulePoint, other: SchedulePoint) -> bool:
@@ -429,12 +449,12 @@ def format_weekdays(weekdays: frozenset[int] | None, language: str) -> str:
 
 
 def format_when(
-    point: SchedulePoint,
-    language: str,
-    today: dt.datetime | None = None,
-    sun: Sun | None = None,
+    point: SchedulePoint, language: str, today: dt.datetime | None = None
 ) -> str:
-    """Return when a point is, e.g. "Sunset + 1:30 (until 22:00, today 18:25)"."""
+    """Return when a point is, e.g. "Sunset + 1:30 (until 22:00, today 18:25)".
+
+    Today is when the point is today, if known.
+    """
     if point.time is not None:
         return point.time.strftime("%H:%M")
     names = SUN_EVENT_NAMES.get(language, SUN_EVENT_NAMES["en"])
@@ -450,39 +470,29 @@ def format_when(
         details.append(f"{since} {point.earliest:%H:%M}")
     elif point.latest is not None:
         details.append(f"{until} {point.latest:%H:%M}")
-    if (
-        today is not None
-        and today.tzinfo is not None
-        and (when := point_time(point, today.date(), today.tzinfo, sun)) is not None
-    ):
-        details.append(f"{today_word} {when:%H:%M}")
+    if today is not None:
+        details.append(f"{today_word} {today:%H:%M}")
     if details:
         text += f" ({', '.join(details)})"
     return text
 
 
 def point_columns(
-    point: SchedulePoint,
-    language: str,
-    today: dt.datetime | None = None,
-    sun: Sun | None = None,
+    point: SchedulePoint, language: str, today: dt.datetime | None = None
 ) -> tuple[str, str, str]:
     """Return a point's time, color temperature and days as text."""
     return (
-        format_when(point, language, today, sun),
+        format_when(point, language, today),
         f"{point.kelvin} K",
         format_weekdays(point.weekdays, language),
     )
 
 
 def format_point(
-    point: SchedulePoint,
-    language: str,
-    today: dt.datetime | None = None,
-    sun: Sun | None = None,
+    point: SchedulePoint, language: str, today: dt.datetime | None = None
 ) -> str:
     """Return a point as one line, e.g. "06:30 · 3000 K · Mo-Fr"."""
-    return " · ".join(point_columns(point, language, today, sun))
+    return " · ".join(point_columns(point, language, today))
 
 
 TABLE_HEADERS = {
@@ -499,9 +509,10 @@ def format_table(
 ) -> str:
     """Return points as a Markdown table, in their order, for the options flow."""
     header = TABLE_HEADERS.get(language, TABLE_HEADERS["en"])
+    times = today_times(points, today, sun)
     rows = [f"| {' | '.join(header)} |", "|---|---|---|"]
     rows.extend(
-        f"| {' | '.join(point_columns(point, language, today, sun))} |"
+        f"| {' | '.join(point_columns(point, language, times.get(point)))} |"
         for point in points
     )
     return "\n".join(rows)

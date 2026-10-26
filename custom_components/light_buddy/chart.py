@@ -33,7 +33,8 @@ from .schedule import (
 )
 
 URL = "/api/light_buddy/curve.svg"
-RENDER_LOCK = asyncio.Lock()
+# One per Home Assistant, so it belongs to its event loop.
+DATA_RENDER_LOCK = "light_buddy_chart_lock"
 MAX_POINTS = 50
 MIN_KELVIN = 1000
 MAX_KELVIN = 10000
@@ -412,7 +413,7 @@ class CurveChartView(HomeAssistantView):
         language = request.query.get("lang") or hass.config.language
         # Off the event loop, and one at a time, as anyone may ask for any
         # chart.
-        async with RENDER_LOCK:
+        async with hass.data.setdefault(DATA_RENDER_LOCK, asyncio.Lock()):
             svg = await hass.async_add_executor_job(
                 render_svg, points, dt_util.now(), language, hass_sun(hass)
             )

@@ -15,6 +15,7 @@ from custom_components.light_buddy.schedule import (
     SchedulePoint,
     Sun,
     Target,
+    day_times,
     format_when,
     point_time,
     points_from_options,
@@ -201,7 +202,7 @@ def test_format_when() -> None:
     point = DEFAULT_SCHEDULE[3]
     assert format_when(point, "en") == "Sunset + 1:30 (until 22:00)"
     assert (
-        format_when(point, "de", _at(12, 0), BERLIN)
+        format_when(point, "de", _at(18, 18))
         == "Sonnenuntergang + 1:30 (bis 22:00, heute 18:18)"
     )
     assert format_when(DEFAULT_SCHEDULE[0], "en") == f"Sunrise (06:00{DASH}07:30)"
@@ -279,3 +280,17 @@ def test_unknown_anchor_is_skipped() -> None:
     assert points_from_options([{"anchor": "moonrise", "kelvin": 3000}]) == (
         DEFAULT_SCHEDULE
     )
+
+
+def test_window_keeps_points_apart() -> None:
+    """Pulled back by a window, a point stays a while before the next one."""
+    oslo = ZoneInfo("Europe/Oslo")
+    times = {
+        point: when
+        for when, point in day_times(
+            DEFAULT_SCHEDULE, dt.date(2026, 5, 20), oslo, Sun(59.91, 10.75)
+        )
+    }
+    sunset, later = times[DEFAULT_SCHEDULE[2]], times[DEFAULT_SCHEDULE[3]]
+    assert later.strftime("%H:%M") == "22:00"
+    assert later - sunset >= dt.timedelta(minutes=30)

@@ -1,9 +1,10 @@
-"""Color temperature offsets for single lights, in Kelvin."""
+"""Color temperature offsets for single lights, in Kelvin or mired."""
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Self
 
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from .const import CONF_OFFSET_UNIT, CONF_OFFSET_VALUE, UNIT_KELVIN, UNIT_MIRED
 
 # Beyond what any light supports. Keeps results away from zero mired.
 MIN_KELVIN = 1000
@@ -13,35 +14,64 @@ MAX_KELVIN = 10000
 # work in whole mireds. Two mireds are below what the eye can tell apart.
 MIRED_TOLERANCE = 2
 
+# Switching the unit keeps the offset's effect at this color temperature.
+REFERENCE_KELVIN = 3000
 
-@callback
-def async_resolve_offsets(
-    hass: HomeAssistant, options: Mapping[str, int]
-) -> dict[str, int]:
-    """Return the offsets per entity id.
+# Largest offset and slider step per unit.
+OFFSET_LIMITS = {UNIT_KELVIN: 1500, UNIT_MIRED: 100}
+OFFSET_STEPS = {UNIT_KELVIN: 25, UNIT_MIRED: 1}
 
-    Options store offsets by entity registry id, so they survive a changed
-    entity id. Offsets of removed entities are skipped.
+
+@dataclass(frozen=True, slots=True)
+class ColorTempOffset:
+    """Shift the color temperature of a light.
+
+    In Kelvin, a negative offset makes a light warmer. In mired, a positive
+    offset makes it warmer, and looks equally strong at every color
+    temperature.
     """
-    registry = er.async_get(hass)
-    return {
-        entity_id: offset
-        for registry_id, offset in options.items()
-        if (entity_id := er.async_resolve_entity_id(registry, registry_id))
-    }
 
+    value: float = 0
+    unit: str = UNIT_KELVIN
 
-def apply_offset(kelvin: float, offset: int) -> float:
-    """Return the color temperature to send for a requested one.
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Self:
+        """Create an offset from its stored options."""
+        return cls(data[CONF_OFFSET_VALUE], data[CONF_OFFSET_UNIT])
 
-    A negative offset makes a light warmer.
-    """
-    return _bound(kelvin + offset)
+    def as_dict(self) -> dict[str, Any]:
+        """Return the offset for storing in the options."""
+        return {CONF_OFFSET_VALUE: self.value, CONF_OFFSET_UNIT: self.unit}
 
+    def apply(self, kelvin: float) -> float:
+        """Return the color temperature to send for a requested one."""
+        if self.unit == UNIT_MIRED:
+            return _mired_to_kelvin(_kelvin_to_mired(kelvin) + self.value)
+        return _bound(kelvin + self.value)
 
-def remove_offset(kelvin: float, offset: int) -> float:
-    """Return the requested color temperature for one a light reports."""
-    return _bound(kelvin - offset)
+    def remove(self, kelvin: float) -> float:
+        """Return the requested color temperature for one a light reports."""
+        if self.unit == UNIT_MIRED:
+            return _mired_to_kelvin(_kelvin_to_mired(kelvin) - self.value)
+        return _bound(kelvin - self.value)
+
+    def with_value(self, value: float) -> ColorTempOffset:
+        """Return the offset with another value, limited to its unit."""
+        limit = OFFSET_LIMITS[self.unit]
+        step = OFFSET_STEPS[self.unit]
+        value = round(min(max(value, -limit), limit) / step) * step
+        return ColorTempOffset(value, self.unit)
+
+    def converted(self, unit: str) -> ColorTempOffset:
+        """Return an offset in another unit with the same effect at 3000 K."""
+        if unit == self.unit:
+            return self
+        shifted = self.apply(REFERENCE_KELVIN)
+        if unit == UNIT_MIRED:
+            value = _kelvin_to_mired(shifted) - _kelvin_to_mired(REFERENCE_KELVIN)
+        else:
+            value = shifted - REFERENCE_KELVIN
+        return ColorTempOffset(unit=unit).with_value(value)
 
 
 def clamp(kelvin: float, min_kelvin: int | None, max_kelvin: int | None) -> int:
@@ -56,10 +86,20 @@ def clamp(kelvin: float, min_kelvin: int | None, max_kelvin: int | None) -> int:
 
 def same_color_temp(kelvin_a: float, kelvin_b: float) -> bool:
     """Return True if both color temperatures look the same."""
-    mired_a = 1_000_000 / _bound(kelvin_a)
-    mired_b = 1_000_000 / _bound(kelvin_b)
-    return abs(mired_a - mired_b) <= MIRED_TOLERANCE
+    return abs(_kelvin_to_mired(kelvin_a) - _kelvin_to_mired(kelvin_b)) <= (
+        MIRED_TOLERANCE
+    )
 
 
 def _bound(kelvin: float) -> float:
     return min(max(kelvin, MIN_KELVIN), MAX_KELVIN)
+
+
+# The color helpers of Home Assistant round down to whole mireds, which would
+# make the shown color temperature drift from the requested one.
+def _kelvin_to_mired(kelvin: float) -> float:
+    return 1_000_000 / _bound(kelvin)
+
+
+def _mired_to_kelvin(mired: float) -> float:
+    return _bound(1_000_000 / max(mired, 1_000_000 / MAX_KELVIN))

@@ -29,6 +29,7 @@ from homeassistant.const import (
     STATE_ON,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
+    Platform,
 )
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, State, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -38,7 +39,7 @@ from .const import (
     COMMAND_INTERVAL_SECONDS,
 )
 from .manager import LightBuddyConfigEntry
-from .offset import remove_offset, same_color_temp
+from .offset import ColorTempOffset, same_color_temp
 from .room import RoomCommander, turn_off_params
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,11 +60,13 @@ async def async_setup_entry(
 
     The room manager adds them once all platforms are set up.
     """
-    entry.runtime_data.async_add_lights = async_add_entities
+    entry.runtime_data.async_add_entities[Platform.LIGHT] = async_add_entities
 
 
 class RoomLight(LightEntity):
     """A light controlling all lights of an area."""
+
+    PLATFORM = Platform.LIGHT
 
     _attr_available = False
     _attr_has_entity_name = True
@@ -75,7 +78,7 @@ class RoomLight(LightEntity):
         area_id: str,
         name: str,
         members: list[str],
-        offsets: Mapping[str, int],
+        offsets: Mapping[str, ColorTempOffset],
     ) -> None:
         """Initialize the room light."""
         self.area_id = area_id
@@ -287,8 +290,8 @@ class RoomLight(LightEntity):
                 return requested
             # The light was changed some other way since.
             del self._commander.sent_color_temps[state.entity_id]
-        if offset := self._offsets.get(state.entity_id):
-            return remove_offset(kelvin, offset)
+        if (offset := self._offsets.get(state.entity_id)) is not None:
+            return offset.remove(kelvin)
         return kelvin
 
     def requested_color_temp(self, entity_id: str) -> float | None:
@@ -306,10 +309,14 @@ class RoomLight(LightEntity):
         return self._requested_color_temp(state)
 
     async def async_set_member_color_temp(self, entity_id: str, kelvin: float) -> None:
-        """Send a color temperature to one light, with its current offset."""
+        """Send a color temperature to one light, with its current offset.
+
+        Sent right away, apart from the room's commands, which it must not be
+        merged with.
+        """
         assert self._commander is not None
-        await self._commander.async_turn_on(
-            [entity_id], {ATTR_COLOR_TEMP_KELVIN: round(kelvin)}, None
+        await self._commander.async_send_now(
+            [entity_id], {ATTR_COLOR_TEMP_KELVIN: round(kelvin)}
         )
 
 

@@ -37,14 +37,25 @@ Einstellungen → Geräte & Dienste → Light Buddy → **Konfigurieren**:
 
 ## Farbtemperatur-Offset
 
-Für eine Lampe, die kälter oder wärmer wirkt als die anderen. Jede farbfähige Lampe in einem Raum hat auf ihrer Geräteseite unter **Konfiguration** einen Schieberegler „Farbtemperatur-Offset“ in Kelvin. Ein negativer Wert macht die Lampe wärmer: Bei -300 bekommt sie 2700 K, wenn der Raum auf 3000 K steht.
+Für eine Lampe, die kälter oder wärmer wirkt als die anderen. Jede Lampe mit Farbtemperatur in einem Raum hat auf ihrer Geräteseite unter **Konfiguration** zwei Einstellungen:
 
-**Live-Vorschau:** Schalte den Raum ein und stelle eine Farbtemperatur ein. Jede Änderung am Schieberegler wirkt dann sofort auf die Lampe, sodass du sie direkt mit den anderen vergleichen kannst.
+- **Farbtemperatur-Offset**: Schieberegler für den Offset.
+- **Einheit Farbtemperatur-Offset**: Kelvin oder Mired. Beim Umschalten wird der Offset so umgerechnet, dass die Lampe bei 3000 K gleich aussieht.
+
+**Kelvin oder Mired?** Ein Kelvin-Offset wirkt bei warmem Licht stark und bei kaltem kaum: -300 K sind bei 2700 K deutlich, bei 6000 K fast unsichtbar. Ein Mired-Offset wirkt überall gleich stark, so wie das Auge Farbtemperatur wahrnimmt. In Kelvin macht ein negativer Wert die Lampe wärmer, in Mired ein positiver.
+
+**Ausprobieren:** Schalte den Raum ein. Jede Änderung am Schieberegler wirkt sofort auf die Lampe.
+
+1. Raum auf einen warmen Wert stellen, z. B. 2700 K, und den Offset anpassen, bis die Lampe zu den anderen passt.
+2. Raum auf einen kalten Wert stellen, z. B. 5000 K. Passt die Lampe noch, ist die Einheit richtig. Sonst die Einheit umschalten und wiederholen.
+
+Weitere Hinweise:
 
 - Der Offset wirkt nur, wenn die Farbtemperatur über ein Raum-Licht gesetzt wird. Steuerst du die Lampe direkt, bekommt sie den Wert ohne Offset.
 - Der Zielwert wird auf den Bereich der Lampe begrenzt.
 - Das Raum-Licht zeigt den gewünschten Wert an, nicht den verschobenen.
-- Die Schieberegler erscheinen nicht auf Dashboards und werden von Bereichs-Aktionen nicht erfasst.
+- Die Einstellungen erscheinen nicht auf Dashboards und werden von Bereichs-Aktionen nicht erfasst.
+- Lampen, die nur Farben können, haben keinen Offset.
 
 ## Verhalten
 

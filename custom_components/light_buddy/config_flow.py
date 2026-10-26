@@ -17,8 +17,6 @@ from homeassistant.helpers import selector
 from .const import CONF_EXCLUDED_AREAS, CONF_EXCLUDED_LIGHTS, DOMAIN
 
 
-# Larger shifts would leave the range of common lights, e.g. 2700 K plus 100
-# mired is about 2100 K.
 class LightBuddyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Set up Light Buddy. Rooms are discovered from the area registry."""
 

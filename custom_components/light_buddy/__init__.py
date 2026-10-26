@@ -5,7 +5,7 @@ from homeassistant.core import HomeAssistant
 
 from .manager import LightBuddyConfigEntry, RoomManager
 
-PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER]
+PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.NUMBER, Platform.SELECT]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: LightBuddyConfigEntry) -> bool:

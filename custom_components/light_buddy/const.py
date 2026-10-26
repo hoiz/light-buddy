@@ -6,8 +6,13 @@ DOMAIN: Final = "light_buddy"
 
 CONF_EXCLUDED_AREAS: Final = "excluded_areas"
 CONF_EXCLUDED_LIGHTS: Final = "excluded_lights"
-# Offsets in Kelvin per entity registry id.
+# Offsets per entity registry id.
 CONF_OFFSETS: Final = "offsets"
+CONF_OFFSET_UNIT: Final = "unit"
+CONF_OFFSET_VALUE: Final = "value"
+
+UNIT_KELVIN: Final = "K"
+UNIT_MIRED: Final = "mired"
 
 # Wait for registry changes to settle before recomputing room membership.
 MEMBERSHIP_DEBOUNCE_SECONDS: Final = 1.0

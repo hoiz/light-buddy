@@ -31,7 +31,7 @@ from homeassistant.const import (
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 
-from .offset import apply_offset, clamp
+from .offset import ColorTempOffset, clamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def async_split_turn_on(
     hass: HomeAssistant,
     members: Iterable[str],
     params: dict[str, Any],
-    offsets: Mapping[str, int],
+    offsets: Mapping[str, ColorTempOffset],
 ) -> list[tuple[list[str], dict[str, Any]]]:
     """Split turn_on params into as few calls as possible.
 
@@ -59,10 +59,13 @@ def async_split_turn_on(
     for entity_id in members:
         member_params = dict(params)
         state = hass.states.get(entity_id)
-        if ATTR_COLOR_TEMP_KELVIN in params and (offset := offsets.get(entity_id)):
+        if (
+            ATTR_COLOR_TEMP_KELVIN in params
+            and (offset := offsets.get(entity_id)) is not None
+        ):
             attributes = state.attributes if state is not None else {}
             member_params[ATTR_COLOR_TEMP_KELVIN] = clamp(
-                apply_offset(params[ATTR_COLOR_TEMP_KELVIN], offset),
+                offset.apply(params[ATTR_COLOR_TEMP_KELVIN]),
                 attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
                 attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
             )
@@ -94,7 +97,7 @@ class RoomCommander:
         self,
         hass: HomeAssistant,
         interval: float,
-        offsets: Mapping[str, int],
+        offsets: Mapping[str, ColorTempOffset],
     ) -> None:
         """Initialize the commander."""
         self.hass = hass
@@ -120,6 +123,10 @@ class RoomCommander:
     ) -> None:
         """Turn off the given lights."""
         await self._async_submit(SERVICE_TURN_OFF, members, params, context)
+
+    async def async_send_now(self, members: list[str], params: dict[str, Any]) -> None:
+        """Turn on the given lights at once, apart from throttled commands."""
+        await self._async_send(SERVICE_TURN_ON, members, params, None)
 
     @callback
     def async_cancel(self) -> None:

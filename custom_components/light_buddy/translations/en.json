@@ -38,6 +38,22 @@
       "color_temp_offset_light": {
         "name": "{light} color temperature offset"
       }
+    },
+    "select": {
+      "color_temp_offset_unit": {
+        "name": "Color temperature offset unit",
+        "state": {
+          "K": "Kelvin",
+          "mired": "Mired"
+        }
+      },
+      "color_temp_offset_unit_light": {
+        "name": "{light} color temperature offset unit",
+        "state": {
+          "K": "Kelvin",
+          "mired": "Mired"
+        }
+      }
     }
   }
 }

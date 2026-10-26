@@ -32,6 +32,7 @@ class ColorTempOffsetNumber(LightOffsetEntity, NumberEntity):
     PLATFORM = Platform.NUMBER
     UNIQUE_ID_SUFFIX = "_color_temp_offset"
     TRANSLATION_KEY = "color_temp_offset"
+    ENTITY_ID_SUFFIX = "color_temperature_offset"
 
     _attr_mode = NumberMode.SLIDER
 

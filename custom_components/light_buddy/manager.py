@@ -160,7 +160,7 @@ class RoomManager:
         } | {
             f"{registry_id}{cls.UNIQUE_ID_SUFFIX}"
             for registry_id in registry_ids
-            for cls in _offset_entity_classes()
+            for cls in offset_entity_classes()
         }
         for registry_entry in er.async_entries_for_config_entry(
             entity_registry, self.entry.entry_id
@@ -286,7 +286,7 @@ class RoomManager:
                 continue
             new: list[LightOffsetEntity] = [
                 cls(self, light_entry, device, light_name)
-                for cls in _offset_entity_classes()
+                for cls in offset_entity_classes()
             ]
             self._offset_entities[registry_id] = new
             if entities is None:
@@ -377,7 +377,7 @@ def _room_entity_classes() -> tuple[type[RoomEntity], ...]:
     return (ScheduleSwitch, TargetColorTempSensor)
 
 
-def _offset_entity_classes() -> tuple[type[LightOffsetEntity], ...]:
+def offset_entity_classes() -> tuple[type[LightOffsetEntity], ...]:
     """Return the offset settings each light with color temperature gets."""
     from .number import ColorTempOffsetNumber
     from .select import ColorTempOffsetUnitSelect

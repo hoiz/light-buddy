@@ -1,0 +1,64 @@
+"""Tests for setting up and migrating Light Buddy."""
+
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.light_buddy.const import DOMAIN
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+
+
+async def test_offset_entity_ids_are_english(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Offset settings get entity ids from their light, whatever the language."""
+    hass.config.language = "de"
+    add_light("stehlampe", device_area="Wohnzimmer")
+    await setup_integration()
+
+    assert hass.states.get("number.stehlampe_color_temperature_offset") is not None
+    assert hass.states.get("select.stehlampe_color_temperature_offset_unit") is not None
+
+
+async def test_migrate_german_entity_ids(hass: HomeAssistant, add_light) -> None:
+    """Entity ids from the language of Home Assistant become English once."""
+    lamp = add_light("stehlampe", device_area="Wohnzimmer")
+    add_light("taken", device_area="Wohnzimmer")
+    registry = er.async_get(hass)
+    entry = MockConfigEntry(domain=DOMAIN, version=1, minor_version=1)
+    entry.add_to_hass(hass)
+    lamp_id = registry.async_get(lamp).id
+    taken_id = registry.async_get("light.taken").id
+    for domain, unique_id, object_id in (
+        ("number", f"{lamp_id}_color_temp_offset", "stehlampe_farbtemperatur_offset"),
+        (
+            "select",
+            f"{lamp_id}_color_temp_offset_unit",
+            "stehlampe_einheit_farbtemperatur_offset",
+        ),
+        ("number", f"{taken_id}_color_temp_offset", "taken_farbtemperatur_offset"),
+    ):
+        registry.async_get_or_create(
+            domain,
+            DOMAIN,
+            unique_id,
+            suggested_object_id=object_id,
+            config_entry=entry,
+        )
+    # Somebody else already uses the new entity id.
+    registry.async_get_or_create(
+        "number", "other", "x", suggested_object_id="taken_color_temperature_offset"
+    )
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.minor_version == 2
+    assert registry.async_get_entity_id(
+        "number", DOMAIN, f"{lamp_id}_color_temp_offset"
+    ) == ("number.stehlampe_color_temperature_offset")
+    assert registry.async_get_entity_id(
+        "select", DOMAIN, f"{lamp_id}_color_temp_offset_unit"
+    ) == ("select.stehlampe_color_temperature_offset_unit")
+    assert registry.async_get_entity_id(
+        "number", DOMAIN, f"{taken_id}_color_temp_offset"
+    ) == ("number.taken_farbtemperatur_offset")

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar
 
 from homeassistant.const import EntityCategory, Platform
+from homeassistant.core import split_entity_id
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity import Entity
 
@@ -24,6 +25,7 @@ class LightOffsetEntity(Entity):
     PLATFORM: ClassVar[Platform]
     UNIQUE_ID_SUFFIX: ClassVar[str]
     TRANSLATION_KEY: ClassVar[str]
+    ENTITY_ID_SUFFIX: ClassVar[str]
 
     _attr_entity_category = EntityCategory.CONFIG
     _attr_has_entity_name = True
@@ -40,6 +42,7 @@ class LightOffsetEntity(Entity):
         self._manager = manager
         self.registry_id = light_entry.id
         self._attr_unique_id = f"{light_entry.id}{self.UNIQUE_ID_SUFFIX}"
+        self.entity_id = self.entity_id_for(light_entry.entity_id)
         self.device_entry = device
         self._light_name = light_name
         # Lights that are not the main entity of their device, or have no
@@ -49,6 +52,15 @@ class LightOffsetEntity(Entity):
         else:
             self._attr_translation_key = f"{self.TRANSLATION_KEY}_light"
             self._attr_translation_placeholders = {"light": light_name}
+
+    @classmethod
+    def entity_id_for(cls, light_entity_id: str) -> str:
+        """Return the entity id for a light's setting.
+
+        Set from the light's entity id, as Home Assistant would otherwise
+        derive it from the name in its own language.
+        """
+        return f"{cls.PLATFORM}.{split_entity_id(light_entity_id)[1]}_{cls.ENTITY_ID_SUFFIX}"
 
     @property
     def offset(self) -> ColorTempOffset:

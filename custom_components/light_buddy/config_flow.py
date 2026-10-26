@@ -21,6 +21,8 @@ class LightBuddyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Set up Light Buddy. Rooms are discovered from the area registry."""
 
     VERSION = 1
+    # 2: offset settings got English entity ids.
+    MINOR_VERSION = 2
 
     @override
     async def async_step_user(

@@ -32,6 +32,7 @@ class ColorTempOffsetUnitSelect(LightOffsetEntity, SelectEntity):
     PLATFORM = Platform.SELECT
     UNIQUE_ID_SUFFIX = "_color_temp_offset_unit"
     TRANSLATION_KEY = "color_temp_offset_unit"
+    ENTITY_ID_SUFFIX = "color_temperature_offset_unit"
 
     _attr_options = [UNIT_KELVIN, UNIT_MIRED]
 

@@ -16,7 +16,6 @@
         "title": "Light-Buddy-Optionen",
         "menu_options": {
           "rooms": "Räume",
-          "schedule": "Zeitplan",
           "settings": "Einstellungen"
         }
       },
@@ -31,50 +30,11 @@
           "excluded_lights": "Diese Lampen gehören zu keinem Raum-Licht, z. B. Template-Lichter, die andere Lampen steuern."
         }
       },
-      "schedule": {
-        "title": "Zeitplan",
-        "description": "Die Farbtemperatur aller Räume folgt diesem Zeitplan. Punkte können der Sonne folgen; zwischen zwei Punkten ändert sich die Farbtemperatur so wie das Tageslicht.\n\n![Kurve]({chart})\n\n{points}\n\nÄnderungen werden mit **Speichern** übernommen.",
-        "menu_options": {
-          "add_point": "Punkt hinzufügen",
-          "edit_point": "Punkt bearbeiten",
-          "delete_points": "Punkte löschen",
-          "reset_schedule": "Auf Standard zurücksetzen",
-          "save_schedule": "Speichern"
-        }
-      },
-      "point": {
-        "title": "Punkt",
-        "data": {
-          "time": "Uhrzeit",
-          "kelvin": "Farbtemperatur",
-          "weekdays": "Wochentage"
-        },
-        "data_description": {
-          "weekdays": "Leer lassen für jeden Tag."
-        }
-      },
-      "edit_point": {
-        "title": "Punkt bearbeiten",
-        "data": {
-          "point": "Punkt"
-        }
-      },
-      "delete_points": {
-        "title": "Punkte löschen",
-        "data": {
-          "points": "Punkte"
-        }
-      },
-      "reset_schedule": {
-        "title": "Auf Standard zurücksetzen",
-        "description": "Ersetzt den Zeitplan durch den Standard, der dem Tageslicht folgt und um 12:30 am kältesten ist.",
-        "data": {
-          "confirm": "Zeitplan zurücksetzen"
-        }
-      },
       "settings": {
         "title": "Einstellungen",
         "data": {
+          "warmest": "Wärmste Farbtemperatur",
+          "coldest": "Kälteste Farbtemperatur",
           "threshold": "Kleinste Änderung",
           "transition": "Übergang",
           "auto_resume_minutes": "Fortsetzen nach",
@@ -83,44 +43,20 @@
           "disco_palette": "Disco-Palette"
         },
         "data_description": {
+          "warmest": "Nachts, frühmorgens und ab 1:30 nach Sonnenuntergang (spätestens 22:00).",
+          "coldest": "Zum Sonnenhöchststand.",
           "threshold": "Eingeschaltete Lampen bekommen erst eine neue Farbtemperatur, wenn der Zielwert mindestens so weit abweicht.",
           "transition": "Für die Anpassungen des Zeitplans jede Minute. Kurz halten: IKEA-Lampen ignorieren während eines Übergangs andere Befehle, sogar das Ausschalten.",
           "auto_resume_minutes": "Nach einer manuellen Änderung schaltet sich der Zeitplan-Schalter des Raums nach dieser Zeit von selbst wieder ein. 0 wartet, bis der Raum aus ist.",
           "separate_commands": "Manche Lampen, vor allem von IKEA, ändern Helligkeit und Farbtemperatur nicht sauber gleichzeitig, z. B. beim Einschalten eines Raums mit einer Helligkeit. Sie bekommen dann zuerst die Farbtemperatur und eine halbe Sekunde später die Helligkeit.",
           "disco_interval": "Sekunden bis zur nächsten Farbe. Jeder Farbwechsel sendet einen Befehl pro Farbe, sehr kurze Zeiten belasten also das Zigbee-Netz.",
           "disco_palette": "Die Farben, durch die der Disco-Modus wechselt. Jede Lampe zeigt eine andere."
-        }
-      },
-      "anchor": {
-        "title": "Punkt",
-        "description": "Liegt der Punkt auf einer Uhrzeit, oder folgt er der Sonne?",
-        "data": {
-          "anchor": "Bei"
-        }
-      },
-      "sun_point": {
-        "title": "{event}",
-        "description": "Heute ist {event} um {today}. Der Versatz verschiebt den Punkt, das Zeitfenster hält ihn zwischen zwei Uhrzeiten, z. B. Sonnenaufgang nicht vor 06:00 und nicht nach 07:30.",
-        "data": {
-          "offset": "Versatz",
-          "earliest": "Nicht vor",
-          "latest": "Nicht nach",
-          "kelvin": "Farbtemperatur",
-          "weekdays": "Wochentage"
         },
-        "data_description": {
-          "offset": "Minuten vor (negativ) oder nach dem Sonnenereignis.",
-          "earliest": "Leer lassen für keine Grenze.",
-          "latest": "Leer lassen für keine Grenze.",
-          "weekdays": "Leer lassen für jeden Tag."
-        }
+        "description": "![Kurve]({chart})\n\nDer Zeitplan folgt der Sonne: am wärmsten vom späten Abend bis zum Sonnenaufgang (nicht vor 06:00, nicht nach 07:30), am kältesten zum Sonnenhöchststand. Die Kurve zeigt die gespeicherten Werte für heute, dünne Linien den längsten und den kürzesten Tag."
       }
     },
     "error": {
-      "duplicate_point": "Zu dieser Uhrzeit gibt es an diesen Tagen schon einen Punkt.",
-      "keep_one_point": "Mindestens ein Punkt muss bleiben.",
-      "too_many_points": "Ein Zeitplan hat höchstens 50 Punkte.",
-      "window_order": "„Nicht vor“ muss früher sein als „Nicht nach“."
+      "schedule_span": "Der kälteste Wert muss mindestens 500 K über dem wärmsten liegen."
     }
   },
   "entity": {
@@ -168,17 +104,6 @@
     }
   },
   "selector": {
-    "weekdays": {
-      "options": {
-        "0": "Montag",
-        "1": "Dienstag",
-        "2": "Mittwoch",
-        "3": "Donnerstag",
-        "4": "Freitag",
-        "5": "Samstag",
-        "6": "Sonntag"
-      }
-    },
     "separate_commands": {
       "options": {
         "off": "Aus",
@@ -192,14 +117,6 @@
         "party": "Party",
         "fire": "Feuer",
         "ocean": "Ozean"
-      }
-    },
-    "anchor": {
-      "options": {
-        "time": "Uhrzeit",
-        "sunrise": "Sonnenaufgang",
-        "noon": "Sonnenhöchststand",
-        "sunset": "Sonnenuntergang"
       }
     }
   },

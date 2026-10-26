@@ -63,20 +63,16 @@ More notes:
 
 ## Schedule
 
-Every room follows a color temperature schedule. Its points can be at a clock time or follow the sun: sunrise, solar noon or sunset, shifted by an offset and optionally kept within a window of clock times. The sun is computed from the location in Home Assistant's settings; solar noon moves with daylight saving time by itself.
+Every room follows one color temperature schedule, which follows the sun. The sun is computed from the location in Home Assistant's settings; solar noon moves with daylight saving time by itself.
 
-Between two points, the color temperature changes the way daylight does: fast after sunrise and before sunset, slowly around noon. Where the sun does not rise or set all the way between two points, e.g. across midnight, it eases in and out. The change runs in mired, matching how the eye perceives color temperature.
-
-The default curve follows the sun and never gets warmer than 2700 K:
-
-| Point | Color temperature |
+| When | Color temperature |
 |---|---|
-| Sunrise, not before 06:00 and not after 07:30 | 2700 K |
-| Solar noon | 5000 K |
-| Sunset | 3200 K |
-| Sunset + 1:30, at the latest 22:00 | 2700 K |
+| Sunrise, not before 06:00 and not after 07:30 | Warmest (2700 K) |
+| Solar noon | Coldest (5000 K) |
+| Sunset | Two thirds of the way back to the warmest (3200 K) |
+| Sunset + 1:30, at the latest 22:00 | Warmest (2700 K) |
 
-At night it holds 2700 K from the last point to the first.
+At night it holds the warmest value. Between these points, the color temperature changes the way daylight does: fast after sunrise and before sunset, slowly around noon. The change runs in mired, matching how the eye perceives color temperature. The warmest and coldest value are settings, see "Settings".
 
 Every room has a **Schedule** switch (`switch.schedule_<area>`). It is on while the room follows the schedule:
 
@@ -95,22 +91,14 @@ How the schedule behaves:
 - **Offsets:** color temperature offsets apply to the schedule, too.
 - **Range:** a light that cannot reach the target gets the closest value it supports, e.g. 2900 K for an Elgato Key Light when the target is 2200 K.
 
-## Editing the schedule
-
-Settings → Devices & services → Light Buddy → **Configure** → **Schedule**. The schedule applies to all rooms.
-
-- The overview shows the curve as a chart and all points as a table, with today's time of sun points. The chart shows today; thin lines show the longest and the shortest day of the year. It includes changes that are not saved yet; with weekday points, each group of days gets its own line. Its height scale is even in mired, so the Kelvin labels are closer together at the cold end.
-- **Add point** / **Edit point**: first a clock time or a sun event, then its details: the time, or the offset and the optional window ("not before", "not after"); the color temperature; optional weekdays. Without weekdays, a point applies every day; with them you can, for example, set a later morning on weekends.
-- **Delete points**: at least one point has to stay.
-- **Reset to default**: the sun curve from above.
-- **Save** stores all changes. They apply right away, without a restart; Schedule switches turned off by manual changes stay off.
-
 ## Settings
 
-Light Buddy → **Configure** → **Settings**:
+Light Buddy → **Configure** → **Settings** shows the schedule as a chart: today, and thin lines for the longest and the shortest day of the year. It shows the saved values; after changing them, open the settings again to see the new curve.
 
 | Setting | Default | Meaning |
 |---|---|---|
+| Warmest color temperature | 2700 K | At night, in the early morning and in the late evening. |
+| Coldest color temperature | 5000 K | At solar noon. At least 500 K above the warmest. |
 | Smallest change | 50 K | Lights that are on only get a new color temperature once the target differs at least this much. |
 | Transition | 2 s | For the updates every minute. IKEA lights ignore other commands during a transition, so keep it short. |
 | Resume after | 0 (never) | After a manual change, the Schedule switch turns on again by itself after this time. |

@@ -1,13 +1,15 @@
 """Fixtures for Light Buddy tests."""
 
 from collections.abc import Callable
+import datetime as dt
 from typing import Any
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.light_buddy.automation import RoomAutomation
+from custom_components.light_buddy.automation import RoomAutomation, ScheduleSettings
 from custom_components.light_buddy.const import DOMAIN
+from custom_components.light_buddy.schedule import SchedulePoint
 from homeassistant.components.light import ColorMode
 from homeassistant.const import STATE_OFF
 from homeassistant.core import HomeAssistant
@@ -33,8 +35,8 @@ PLUG = {"supported_color_modes": [ColorMode.ONOFF], "supported_features": 0}
 
 # The schedule most tests use: clock times only, so they do not depend on the
 # sun. Coldest at 12:30, 2200 K from 22:30 to 05:30.
-CLOCK_SCHEDULE = [
-    {"anchor": "time", "time": time, "kelvin": kelvin, "weekdays": []}
+CLOCK_SCHEDULE = tuple(
+    SchedulePoint(kelvin, dt.time.fromisoformat(time))
     for time, kelvin in (
         ("05:30", 2200),
         ("06:30", 3000),
@@ -45,7 +47,7 @@ CLOCK_SCHEDULE = [
         ("21:00", 2700),
         ("22:30", 2200),
     )
-]
+)
 
 
 @pytest.fixture(autouse=True)
@@ -117,12 +119,16 @@ async def setup_integration(
     """Set up Light Buddy, optionally with options."""
 
     async def _setup(
-        options: dict[str, Any] | None = None, *, schedule: bool = False
+        options: dict[str, Any] | None = None,
+        *,
+        schedule: bool = False,
+        sun: bool = False,
     ) -> MockConfigEntry:
         """Set up the integration.
 
         Schedules do not start unless asked for, so tests of other features
-        are not affected by the time of day.
+        are not affected by the time of day. They follow a clock time curve
+        unless the sun is asked for.
         """
         if not schedule:
             # Without a target, the schedule does nothing.
@@ -130,8 +136,13 @@ async def setup_integration(
             monkeypatch.setattr(
                 RoomAutomation, "_async_update_target", lambda self: None
             )
-        options = {"schedule": CLOCK_SCHEDULE, **(options or {})}
-        entry = MockConfigEntry(domain=DOMAIN, title="Light Buddy", options=options)
+        if not sun:
+            monkeypatch.setattr(
+                ScheduleSettings, "points", property(lambda self: CLOCK_SCHEDULE)
+            )
+        entry = MockConfigEntry(
+            domain=DOMAIN, title="Light Buddy", options=options or {}
+        )
         entry.add_to_hass(hass)
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

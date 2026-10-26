@@ -16,20 +16,31 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    COLDEST_KELVIN,
     COLOR_TEMP_THRESHOLD_KELVIN,
     CONF_AUTO_RESUME_MINUTES,
+    CONF_COLDEST,
     CONF_SEPARATE_COMMANDS,
     CONF_SETTINGS,
     CONF_THRESHOLD,
     CONF_TRANSITION,
+    CONF_WARMEST,
     SCHEDULE_INTERVAL,
     SEPARATE_OFF,
     TRANSITION_SCHEDULE,
     TRANSITION_TURN_ON,
+    WARMEST_KELVIN,
 )
 from .disco import DiscoSettings, RoomDisco
 from .room import COLOR_GROUP_ATTRS
-from .schedule import DEFAULT_SCHEDULE, SchedulePoint, Sun, Target, target_at
+from .schedule import (
+    DEFAULT_SCHEDULE,
+    SchedulePoint,
+    Sun,
+    Target,
+    sun_schedule,
+    target_at,
+)
 
 if TYPE_CHECKING:
     from .light import RoomLight
@@ -59,6 +70,14 @@ class ScheduleSettings:
     auto_resume_minutes: float = 0
     # Which lights get a brightness separately from the color temperature.
     separate_commands: str = SEPARATE_OFF
+    # The schedule's warmest and coldest color temperature, in Kelvin.
+    warmest: int = WARMEST_KELVIN
+    coldest: int = COLDEST_KELVIN
+
+    @property
+    def points(self) -> tuple[SchedulePoint, ...]:
+        """Return the schedule's points."""
+        return sun_schedule(self.warmest, self.coldest)
 
     @classmethod
     def from_options(cls, options: Mapping[str, Any]) -> Self:
@@ -74,6 +93,8 @@ class ScheduleSettings:
             separate_commands=data.get(
                 CONF_SEPARATE_COMMANDS, defaults.separate_commands
             ),
+            warmest=int(data.get(CONF_WARMEST, defaults.warmest)),
+            coldest=int(data.get(CONF_COLDEST, defaults.coldest)),
         )
 
 

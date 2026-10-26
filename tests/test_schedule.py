@@ -16,10 +16,8 @@ from custom_components.light_buddy.schedule import (
     Sun,
     Target,
     day_times,
-    format_when,
     point_time,
-    points_from_options,
-    points_to_options,
+    sun_schedule,
     target_at,
 )
 
@@ -170,44 +168,6 @@ def test_daylight_saving_change() -> None:
     assert target_at(points, _at(4, 0, day)) == Target(3000)
 
 
-def test_options_round_trip() -> None:
-    """Points survive storing, and are stored sorted by time."""
-    points = (
-        SchedulePoint(3000, dt.time(18, 0)),
-        SchedulePoint(5000, dt.time(7, 0), weekdays=frozenset({0, 1, 2, 3, 4})),
-        *DEFAULT_SCHEDULE,
-    )
-    stored = points_to_options(points)
-    assert [point.get("time") or point["anchor"] for point in stored] == [
-        "sunrise",
-        "07:00",
-        "noon",
-        "18:00",
-        "sunset",
-        "sunset",
-    ]
-    assert set(points_from_options(stored)) == set(points)
-    assert points_from_options(None) == DEFAULT_SCHEDULE
-
-
-def test_old_options_load() -> None:
-    """Points stored before sun points existed are clock points."""
-    assert points_from_options(
-        [{"time": "07:00", "kelvin": 5000, "weekdays": [5, 6]}]
-    ) == (SchedulePoint(5000, dt.time(7, 0), weekdays=frozenset({5, 6})),)
-
-
-def test_format_when() -> None:
-    """Sun points show their event, offset, window and today's time."""
-    point = DEFAULT_SCHEDULE[3]
-    assert format_when(point, "en") == "Sunset + 1:30 (until 22:00)"
-    assert (
-        format_when(point, "de", _at(18, 18))
-        == "Sonnenuntergang + 1:30 (bis 22:00, heute 18:18)"
-    )
-    assert format_when(DEFAULT_SCHEDULE[0], "en") == f"Sunrise (06:00{DASH}07:30)"
-
-
 @pytest.mark.parametrize(
     ("weekdays", "text"),
     [
@@ -269,19 +229,6 @@ def test_points_at_the_same_moment() -> None:
     assert target_at(points, _at(22, 0), BERLIN) == Target(2700)
 
 
-def test_unknown_anchor_is_skipped() -> None:
-    """Points with an unknown anchor, e.g. edited by hand, are left out."""
-    assert points_from_options(
-        [
-            {"anchor": "moonrise", "kelvin": 3000},
-            {"anchor": "time", "time": "07:00", "kelvin": 5000},
-        ]
-    ) == (SchedulePoint(5000, dt.time(7, 0)),)
-    assert points_from_options([{"anchor": "moonrise", "kelvin": 3000}]) == (
-        DEFAULT_SCHEDULE
-    )
-
-
 def test_window_keeps_points_apart() -> None:
     """Pulled back by a window, a point stays a while before the next one."""
     oslo = ZoneInfo("Europe/Oslo")
@@ -294,3 +241,15 @@ def test_window_keeps_points_apart() -> None:
     sunset, later = times[DEFAULT_SCHEDULE[2]], times[DEFAULT_SCHEDULE[3]]
     assert later.strftime("%H:%M") == "22:00"
     assert later - sunset >= dt.timedelta(minutes=30)
+
+
+def test_sun_schedule() -> None:
+    """The schedule spans the warmest and coldest value, sunset in between."""
+    assert sun_schedule(2700, 5000) == DEFAULT_SCHEDULE
+    assert [point.kelvin for point in DEFAULT_SCHEDULE] == [2700, 5000, 3200, 2700]
+    assert [point.kelvin for point in sun_schedule(3000, 6000)] == [
+        3000,
+        6000,
+        3610,
+        3000,
+    ]

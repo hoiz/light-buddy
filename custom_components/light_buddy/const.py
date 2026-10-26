@@ -14,24 +14,15 @@ CONF_OFFSET_VALUE: Final = "value"
 # Areas whose schedule is turned off.
 CONF_SCHEDULES_OFF: Final = "schedules_off"
 
-# The one schedule for all rooms, a list of points.
-CONF_SCHEDULE: Final = "schedule"
-CONF_TIME: Final = "time"
-CONF_KELVIN: Final = "kelvin"
-CONF_WEEKDAYS: Final = "weekdays"
-# Points at a sun event instead of a clock time, shifted, within a window.
-CONF_ANCHOR: Final = "anchor"
-CONF_SUN_OFFSET: Final = "offset"
-CONF_EARLIEST: Final = "earliest"
-CONF_LATEST: Final = "latest"
-ANCHOR_TIME: Final = "time"
-
 # Global settings.
 CONF_SETTINGS: Final = "settings"
 CONF_THRESHOLD: Final = "threshold"
 CONF_TRANSITION: Final = "transition"
 CONF_AUTO_RESUME_MINUTES: Final = "auto_resume_minutes"
 CONF_SEPARATE_COMMANDS: Final = "separate_commands"
+# The warmest and coldest color temperature of the schedule.
+CONF_WARMEST: Final = "warmest"
+CONF_COLDEST: Final = "coldest"
 CONF_DISCO_INTERVAL: Final = "disco_interval"
 CONF_DISCO_PALETTE: Final = "disco_palette"
 
@@ -75,3 +66,9 @@ SEPARATE_COMMANDS_PAUSE_SECONDS: Final = 0.5
 DISCO_INTERVAL: Final = 4
 DISCO_MIN_INTERVAL: Final = 2
 DISCO_PALETTE: Final = "rainbow"
+
+# The schedule's warmest and coldest color temperature. Settings, these are
+# their defaults, and the least distance between them.
+WARMEST_KELVIN: Final = 2700
+COLDEST_KELVIN: Final = 5000
+MIN_SCHEDULE_SPAN_KELVIN: Final = 500

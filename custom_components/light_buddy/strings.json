@@ -16,7 +16,6 @@
         "title": "Light Buddy options",
         "menu_options": {
           "rooms": "Rooms",
-          "schedule": "Schedule",
           "settings": "Settings"
         }
       },
@@ -31,50 +30,11 @@
           "excluded_lights": "These lights are never part of a room light, e.g. template lights that control other lights."
         }
       },
-      "schedule": {
-        "title": "Schedule",
-        "description": "The color temperature of all rooms follows this schedule. Points can follow the sun; between two points the color temperature changes the way daylight does.\n\n![Curve]({chart})\n\n{points}\n\nChanges are stored with **Save**.",
-        "menu_options": {
-          "add_point": "Add point",
-          "edit_point": "Edit point",
-          "delete_points": "Delete points",
-          "reset_schedule": "Reset to default",
-          "save_schedule": "Save"
-        }
-      },
-      "point": {
-        "title": "Point",
-        "data": {
-          "time": "Time",
-          "kelvin": "Color temperature",
-          "weekdays": "Weekdays"
-        },
-        "data_description": {
-          "weekdays": "Leave empty for every day."
-        }
-      },
-      "edit_point": {
-        "title": "Edit point",
-        "data": {
-          "point": "Point"
-        }
-      },
-      "delete_points": {
-        "title": "Delete points",
-        "data": {
-          "points": "Points"
-        }
-      },
-      "reset_schedule": {
-        "title": "Reset to default",
-        "description": "Replaces the schedule with the default, which follows daylight and is coldest at 12:30.",
-        "data": {
-          "confirm": "Reset the schedule"
-        }
-      },
       "settings": {
         "title": "Settings",
         "data": {
+          "warmest": "Warmest color temperature",
+          "coldest": "Coldest color temperature",
           "threshold": "Smallest change",
           "transition": "Transition",
           "auto_resume_minutes": "Resume after",
@@ -83,44 +43,20 @@
           "disco_palette": "Disco palette"
         },
         "data_description": {
+          "warmest": "At night, in the early morning, and from 1:30 after sunset (at the latest 22:00).",
+          "coldest": "At solar noon.",
           "threshold": "Lights that are on only get a new color temperature once the target differs at least this much.",
           "transition": "For the schedule's updates every minute. Keep it short: IKEA lights ignore other commands, even turning off, during a transition.",
           "auto_resume_minutes": "After a manual change, the room's Schedule switch turns on again by itself after this time. 0 waits until the room is off.",
           "separate_commands": "Some lights, IKEA ones in particular, do not change brightness and color temperature together cleanly, e.g. when turning on a room with a brightness. They then get the color temperature first and the brightness half a second later.",
           "disco_interval": "Seconds until the next color. Each color change sends one command per color, so very short times load the Zigbee network.",
           "disco_palette": "The colors the disco mode cycles through. Each light shows a different one."
-        }
-      },
-      "anchor": {
-        "title": "Point",
-        "description": "Is the point at a clock time, or does it follow the sun?",
-        "data": {
-          "anchor": "At"
-        }
-      },
-      "sun_point": {
-        "title": "{event}",
-        "description": "Today, {event} is at {today}. The offset shifts the point, and the window keeps it between two clock times, e.g. a sunrise not before 06:00 and not after 07:30.",
-        "data": {
-          "offset": "Offset",
-          "earliest": "Not before",
-          "latest": "Not after",
-          "kelvin": "Color temperature",
-          "weekdays": "Weekdays"
         },
-        "data_description": {
-          "offset": "Minutes before (negative) or after the sun event.",
-          "earliest": "Leave empty for no limit.",
-          "latest": "Leave empty for no limit.",
-          "weekdays": "Leave empty for every day."
-        }
+        "description": "![Curve]({chart})\n\nThe schedule follows the sun: warmest from late evening until sunrise (not before 06:00, not after 07:30), coldest at solar noon. The chart shows the saved values for today, and thin lines for the longest and shortest day."
       }
     },
     "error": {
-      "duplicate_point": "There is already a point at this time on these days.",
-      "keep_one_point": "At least one point has to stay.",
-      "too_many_points": "A schedule has at most 50 points.",
-      "window_order": "\"Not before\" has to be earlier than \"Not after\"."
+      "schedule_span": "The coldest value has to be at least 500 K above the warmest."
     }
   },
   "entity": {
@@ -168,17 +104,6 @@
     }
   },
   "selector": {
-    "weekdays": {
-      "options": {
-        "0": "Monday",
-        "1": "Tuesday",
-        "2": "Wednesday",
-        "3": "Thursday",
-        "4": "Friday",
-        "5": "Saturday",
-        "6": "Sunday"
-      }
-    },
     "separate_commands": {
       "options": {
         "off": "Off",
@@ -192,14 +117,6 @@
         "party": "Party",
         "fire": "Fire",
         "ocean": "Ocean"
-      }
-    },
-    "anchor": {
-      "options": {
-        "time": "Clock time",
-        "sunrise": "Sunrise",
-        "noon": "Solar noon",
-        "sunset": "Sunset"
       }
     }
   },

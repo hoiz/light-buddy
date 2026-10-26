@@ -9,6 +9,8 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
+from custom_components.light_buddy.automation import hass_sun
+from custom_components.light_buddy.schedule import sun_schedule, target_at
 from homeassistant.components.light import DATA_COMPONENT, ColorMode
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import Context, HomeAssistant
@@ -34,6 +36,13 @@ async def _tick(hass: HomeAssistant) -> None:
     """Let every room start and run its schedule once."""
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
     await hass.async_block_till_done()
+
+
+def _sun_target(hass: HomeAssistant, warmest: int, coldest: int) -> int:
+    """Return the sun schedule's target now, at the test location."""
+    return target_at(
+        sun_schedule(warmest, coldest), dt_util.now(), hass_sun(hass)
+    ).kelvin
 
 
 def _on(attributes: dict, kelvin: int) -> dict:
@@ -322,20 +331,17 @@ async def test_schedule_changes_apply_without_reload(
     lamp = add_light(
         "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 5000)
     )
-    entry = await setup_integration(schedule=True)
+    entry = await setup_integration(schedule=True, sun=True)
     automation = entry.runtime_data._automations["wohnzimmer"]
     automation.async_mark_manual()
     room = hass.data[DATA_COMPONENT].get_entity(ROOM)
 
     hass.config_entries.async_update_entry(
         entry,
-        options={
-            **entry.options,
-            "schedule": [{"time": "00:00", "kelvin": 3000, "weekdays": []}],
-        },
+        options={**entry.options, "settings": {"warmest": 2700, "coldest": 4000}},
     )
     await hass.async_block_till_done()
-    assert hass.states.get(TARGET).state == "3000"
+    assert hass.states.get(TARGET).state == str(_sun_target(hass, 2700, 4000))
     assert hass.data[DATA_COMPONENT].get_entity(ROOM) is room
     assert automation.paused
     assert hass.states.get(lamp).state == STATE_ON
@@ -397,18 +403,41 @@ async def test_auto_resume_counts_from_last_change(
 async def test_target_sensor_follows_schedule_change(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
-    """A saved schedule shows in the sensor at once, without a tick."""
+    """Saved warmest and coldest values show in the sensor at once."""
     add_light("lamp", area="Wohnzimmer")
-    entry = await setup_integration(schedule=True)
-    assert hass.states.get(TARGET).state == "5000"
+    entry = await setup_integration(schedule=True, sun=True)
+    assert hass.states.get(TARGET).state == str(_sun_target(hass, 2700, 5000))
 
     hass.config_entries.async_update_entry(
         entry,
-        options={
-            **entry.options,
-            "schedule": [{"time": "00:00", "kelvin": 3300, "weekdays": None}],
-        },
+        options={**entry.options, "settings": {"warmest": 3000, "coldest": 6000}},
     )
     await hass.async_block_till_done()
 
-    assert hass.states.get(TARGET).state == "3300"
+    assert hass.states.get(TARGET).state == str(_sun_target(hass, 3000, 6000))
+    assert _sun_target(hass, 3000, 6000) != _sun_target(hass, 2700, 5000)
+
+
+async def test_new_warmest_and_coldest_apply_right_away(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Lights of a room following the schedule get the new target at once."""
+    lamp = add_light(
+        "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 5000)
+    )
+    entry = await setup_integration(schedule=True, sun=True)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, "settings": {"warmest": 2700, "coldest": 4000}},
+    )
+    await hass.async_block_till_done()
+
+    assert [call.data for call in calls] == [
+        {
+            "entity_id": [lamp],
+            "color_temp_kelvin": _sun_target(hass, 2700, 4000),
+            "transition": 2,
+        }
+    ]

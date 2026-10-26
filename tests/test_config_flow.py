@@ -64,29 +64,6 @@ async def test_options_flow(hass: HomeAssistant, add_light, setup_integration) -
     assert hass.states.get("light.all_bad") is not None
 
 
-async def _schedule(
-    hass: HomeAssistant,
-    entry,
-    flow_id: str,
-    step_id: str,
-    data=None,
-    anchor: str = "time",
-):
-    """Pick a schedule menu entry, and submit its form if data is given.
-
-    Points are at the anchor, a clock time unless given.
-    """
-    configure = hass.config_entries.options.async_configure
-    result = await configure(flow_id, {"next_step_id": step_id})
-    if result.get("step_id") == "anchor":
-        result = await configure(flow_id, {"anchor": anchor})
-    if data is not None:
-        result = await configure(flow_id, data)
-        if result.get("step_id") == "anchor":
-            result = await configure(flow_id, {"anchor": anchor})
-    return result
-
-
 def _suggested(result) -> dict:
     return {
         str(key): key.description["suggested_value"]
@@ -95,160 +72,20 @@ def _suggested(result) -> dict:
     }
 
 
-async def test_schedule_add_edit_delete(
-    hass: HomeAssistant, add_light, setup_integration
-) -> None:
-    """Points are added sorted, edited with their values, and deleted."""
-    add_light("lamp", area="Wohnzimmer")
-    entry = await setup_integration()
-    result = await _open(hass, entry, "schedule")
-    assert result["type"] is FlowResultType.MENU
-    assert "| 12:30 | 5000 K |" in result["description_placeholders"]["points"]
-    flow_id = result["flow_id"]
-
-    result = await _schedule(
-        hass,
-        entry,
-        flow_id,
-        "add_point",
-        {"time": "14:00:00", "kelvin": 4800, "weekdays": ["5", "6"]},
-    )
-    assert result["step_id"] == "schedule"
-    assert (
-        "| 14:00 | 4800 K | Sat, Sun |"
-        in (result["description_placeholders"]["points"])
-    )
-    # The chart shows the point before it is saved.
-    assert (
-        "/api/light_buddy/curve.svg?points="
-        in result["description_placeholders"]["chart"]
-    )
-    assert "1400_k4800_d56" in result["description_placeholders"]["chart"]
-
-    # The default has 8 points, sorted by time: 12:30 is the 4th, 14:00 the 5th.
-    result = await _schedule(hass, entry, flow_id, "edit_point", {"point": "4"})
-    assert result["step_id"] == "point"
-    assert _suggested(result) == {
-        "time": "14:00:00",
-        "kelvin": 4800,
-        "weekdays": ["5", "6"],
-    }
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"time": "14:00:00", "kelvin": 4700}
-    )
-    assert "| 14:00 | 4700 K |" in result["description_placeholders"]["points"]
-
-    result = await _schedule(hass, entry, flow_id, "delete_points", {"points": ["0"]})
-    assert "05:30" not in result["description_placeholders"]["points"]
-
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"next_step_id": "save_schedule"}
-    )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    schedule = entry.options["schedule"]
-    assert [point["time"] for point in schedule] == [
-        "06:30",
-        "08:00",
-        "12:30",
-        "14:00",
-        "16:00",
-        "18:30",
-        "21:00",
-        "22:30",
-    ]
-    assert schedule[3] == {
-        "anchor": "time",
-        "time": "14:00",
-        "kelvin": 4700,
-        "weekdays": [],
-    }
-
-
-async def test_schedule_validation(
-    hass: HomeAssistant, add_light, setup_integration
-) -> None:
-    """Points cannot share a time on a day, and one has to stay."""
-    add_light("lamp", area="Wohnzimmer")
-    entry = await setup_integration()
-    flow_id = (await _open(hass, entry, "schedule"))["flow_id"]
-
-    result = await _schedule(
-        hass, entry, flow_id, "add_point", {"time": "12:30:00", "kelvin": 4000}
-    )
-    assert result["errors"] == {"base": "duplicate_point"}
-    # On weekends only, it would still collide with the point for every day.
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"time": "12:30:00", "kelvin": 4000, "weekdays": ["6"]}
-    )
-    assert result["errors"] == {"base": "duplicate_point"}
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"time": "12:45:00", "kelvin": 4000}
-    )
-    assert result["step_id"] == "schedule"
-
-    result = await _schedule(
-        hass,
-        entry,
-        flow_id,
-        "delete_points",
-        {"points": [str(index) for index in range(9)]},
-    )
-    assert result["errors"] == {"base": "keep_one_point"}
-
-
-async def test_weekday_points_at_same_time(
-    hass: HomeAssistant, add_light, setup_integration
-) -> None:
-    """The same time on different days is allowed."""
-    add_light("lamp", area="Wohnzimmer")
-    entry = await setup_integration(
-        {
-            "schedule": [
-                {
-                    "time": "07:00",
-                    "kelvin": 5000,
-                    "weekdays": [0, 1, 2, 3, 4],
-                },
-            ]
-        }
-    )
-    flow_id = (await _open(hass, entry, "schedule"))["flow_id"]
-    result = await _schedule(
-        hass,
-        entry,
-        flow_id,
-        "add_point",
-        {"time": "07:00:00", "kelvin": 3000, "weekdays": ["5", "6"]},
-    )
-    assert result["step_id"] == "schedule"
-
-
-async def test_schedule_reset_and_cancel(
-    hass: HomeAssistant, add_light, setup_integration
-) -> None:
-    """Reset needs confirming, and nothing is stored before saving."""
-    add_light("lamp", area="Wohnzimmer")
-    stored = [{"time": "07:00", "kelvin": 5000, "weekdays": []}]
-    entry = await setup_integration({"schedule": stored})
-    flow_id = (await _open(hass, entry, "schedule"))["flow_id"]
-
-    result = await _schedule(hass, entry, flow_id, "reset_schedule", {"confirm": False})
-    assert "| 07:00 | 5000 K |" in result["description_placeholders"]["points"]
-    result = await _schedule(hass, entry, flow_id, "reset_schedule", {"confirm": True})
-    # The default follows the sun.
-    assert "| Solar noon (today " in result["description_placeholders"]["points"]
-
-    # Leaving without saving keeps the stored schedule.
-    hass.config_entries.options.async_abort(flow_id)
-    assert entry.options["schedule"] == stored
-
-
 async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> None:
     """Settings show their defaults and are stored."""
     add_light("lamp", area="Wohnzimmer")
-    entry = await setup_integration()
+    entry = await setup_integration(
+        {"schedule": [{"time": "07:00", "kelvin": 5000}]}, sun=True
+    )
     result = await _open(hass, entry, "settings")
+    # The chart of the saved schedule.
+    assert result["description_placeholders"]["chart"].startswith(
+        "/api/light_buddy/curve.svg?points=r%2B0_w0600-0730_k2700"
+    )
     assert _suggested(result) == {
+        "warmest": 2700,
+        "coldest": 5000,
         "threshold": 50,
         "transition": 2,
         "auto_resume_minutes": 0,
@@ -260,6 +97,23 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
+            "warmest": 3500,
+            "coldest": 3800,
+            "threshold": 100,
+            "transition": 1.5,
+            "auto_resume_minutes": 30,
+            "separate_commands": "ikea",
+            "disco_interval": 2,
+            "disco_palette": "party",
+        },
+    )
+    assert result["errors"] == {"base": "schedule_span"}
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "warmest": 3000,
+            "coldest": 5500,
             "threshold": 100,
             "transition": 1.5,
             "auto_resume_minutes": 30,
@@ -269,7 +123,11 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    # A schedule of points from before is dropped.
+    assert "schedule" not in entry.options
     assert entry.options["settings"] == {
+        "warmest": 3000,
+        "coldest": 5500,
         "threshold": 100,
         "transition": 1.5,
         "auto_resume_minutes": 30,
@@ -277,97 +135,3 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
         "disco_interval": 2,
         "disco_palette": "party",
     }
-
-
-async def test_schedule_point_limit(
-    hass: HomeAssistant, add_light, setup_integration
-) -> None:
-    """A schedule has at most as many points as the chart shows."""
-    add_light("lamp", area="Wohnzimmer")
-    entry = await setup_integration(
-        {
-            "schedule": [
-                {"time": f"{minute // 60:02d}:{minute % 60:02d}", "kelvin": 3000}
-                for minute in range(0, 50 * 10, 10)
-            ]
-        }
-    )
-    result = await _open(hass, entry, "schedule")
-    result = await _schedule(
-        hass,
-        entry,
-        result["flow_id"],
-        "add_point",
-        {"time": "20:00:00", "kelvin": 3000},
-    )
-    assert result["errors"] == {"base": "too_many_points"}
-
-
-async def test_sun_points(hass: HomeAssistant, add_light, setup_integration) -> None:
-    """Sun points get an offset and a window, and can be edited."""
-    add_light("lamp", area="Wohnzimmer")
-    entry = await setup_integration(
-        {
-            "schedule": [
-                {"anchor": "time", "time": "12:00", "kelvin": 5000, "weekdays": []}
-            ]
-        }
-    )
-    result = await _open(hass, entry, "schedule")
-    flow_id = result["flow_id"]
-
-    result = await _schedule(hass, entry, flow_id, "add_point", anchor="sunset")
-    assert result["step_id"] == "sun_point"
-    assert result["description_placeholders"]["event"] == "Sunset"
-    # A window the wrong way round.
-    result = await hass.config_entries.options.async_configure(
-        flow_id,
-        {"offset": 90, "earliest": "23:00:00", "latest": "22:00:00", "kelvin": 2700},
-    )
-    assert result["errors"] == {"base": "window_order"}
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"offset": 90, "latest": "22:00:00", "kelvin": 2700}
-    )
-    assert result["step_id"] == "schedule"
-    assert (
-        "| Sunset + 1:30 (until 22:00, today "
-        in (result["description_placeholders"]["points"])
-    )
-    assert "s%2B90_w-2200_k2700" in result["description_placeholders"]["chart"]
-
-    # Points are sorted by their typical time: the sun point is the 2nd.
-    result = await _schedule(
-        hass, entry, flow_id, "edit_point", {"point": "1"}, anchor="sunset"
-    )
-    assert result["step_id"] == "sun_point"
-    assert _suggested(result) == {
-        "offset": 90,
-        "latest": "22:00:00",
-        "kelvin": 2700,
-        "weekdays": [],
-    }
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"offset": 90, "latest": "22:00:00", "kelvin": 2700}
-    )
-    assert result["step_id"] == "schedule"
-
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"next_step_id": "save_schedule"}
-    )
-    await hass.async_block_till_done()
-    assert entry.options["schedule"][1] == {
-        "anchor": "sunset",
-        "offset": 90,
-        "earliest": None,
-        "latest": "22:00",
-        "kelvin": 2700,
-        "weekdays": [],
-    }
-
-    # Turned into a clock point, it keeps its color temperature.
-    result = await _open(hass, entry, "schedule")
-    result = await _schedule(
-        hass, entry, result["flow_id"], "edit_point", {"point": "1"}
-    )
-    assert result["step_id"] == "point"
-    assert _suggested(result) == {"kelvin": 2700, "weekdays": []}

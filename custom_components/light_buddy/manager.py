@@ -40,7 +40,6 @@ from .const import (
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
     CONF_OFFSETS,
-    CONF_SCHEDULE,
     CONF_SCHEDULES_OFF,
     MEMBERSHIP_DEBOUNCE_SECONDS,
     SEPARATE_ALL,
@@ -49,7 +48,6 @@ from .const import (
 from .disco import DiscoSettings
 from .membership import async_resolve_rooms
 from .offset import ColorTempOffset
-from .schedule import points_from_options
 
 if TYPE_CHECKING:
     from .entity import LightOffsetEntity, RoomEntity
@@ -90,8 +88,8 @@ class RoomManager:
         # Lights that get brightness and color as separate commands. Shared
         # with all room lights, too.
         self.separate_lights: set[str] = set()
-        self.points = points_from_options(entry.options.get(CONF_SCHEDULE))
         self.settings = ScheduleSettings.from_options(entry.options)
+        self.points = self.settings.points
         self.disco_settings = DiscoSettings.from_options(entry.options)
         self._exclusions = _exclusions(entry.options)
         self._lights: dict[str, RoomLight] = {}
@@ -280,8 +278,8 @@ class RoomManager:
 
         Options the entities store themselves, e.g. offsets, change neither.
         """
-        points = points_from_options(self.entry.options.get(CONF_SCHEDULE))
         settings = ScheduleSettings.from_options(self.entry.options)
+        points = settings.points
         disco_settings = DiscoSettings.from_options(self.entry.options)
         if disco_settings != self.disco_settings:
             self.disco_settings = disco_settings

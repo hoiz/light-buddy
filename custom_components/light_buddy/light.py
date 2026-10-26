@@ -65,6 +65,7 @@ from .room import (
     COLOR_GROUP_ATTRS,
     MemberParams,
     RoomCommander,
+    SentValue,
     reachable_kelvin,
     turn_off_params,
 )
@@ -210,6 +211,7 @@ class RoomLight(LightEntity):
         entity_id = new_state.entity_id
         if old_state.state == STATE_ON and new_state.state != STATE_ON:
             self._turned_off_at[entity_id] = now
+            self._member_turning_off_until.pop(entity_id, None)
             if commander is not None:
                 commander.async_forget_sent([entity_id])
         elif (
@@ -243,32 +245,35 @@ class RoomLight(LightEntity):
         """Return what changed on a light compared with what we last sent.
 
         For changes outside Home Assistant, e.g. by a remote bound to the
-        light. Values reported during our own transition do not count.
+        light. Values reported during our own transitions do not count.
         """
         assert self._commander is not None
-        if (last_sent := self._commander.last_sent.get(state.entity_id)) is None:
-            return set()
-        sent_at, params = last_sent
-        if now - sent_at < params.get(ATTR_TRANSITION, 0) + TRANSITION_GRACE_SECONDS:
-            return set()
+        sent = self._commander.last_sent.get(state.entity_id) or {}
         attributes = state.attributes
         changed = set()
+
+        def _settled(value: SentValue) -> bool:
+            return now - value.sent_at >= value.transition + TRANSITION_GRACE_SECONDS
+
         if (
-            sent_kelvin := params.get(ATTR_COLOR_TEMP_KELVIN)
-        ) is not None and ColorMode.COLOR_TEMP in (
-            attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ()
+            (sent_kelvin := sent.get(ATTR_COLOR_TEMP_KELVIN)) is not None
+            and _settled(sent_kelvin)
+            and ColorMode.COLOR_TEMP
+            in (attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ())
         ):
             kelvin = attributes.get(ATTR_COLOR_TEMP_KELVIN)
-            sent_kelvin = reachable_kelvin(sent_kelvin, attributes)
             if (
                 attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP
                 or kelvin is None
-                or abs(kelvin - sent_kelvin) >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN
+                or abs(kelvin - reachable_kelvin(sent_kelvin.value, attributes))
+                >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN
             ):
                 changed.add(PAUSE_COLOR_TEMP)
-        if (sent_brightness := params.get(ATTR_BRIGHTNESS)) is not None and (
-            (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None
-            and abs(brightness - sent_brightness) >= MANUAL_BRIGHTNESS_THRESHOLD
+        if (
+            (sent_brightness := sent.get(ATTR_BRIGHTNESS)) is not None
+            and _settled(sent_brightness)
+            and (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None
+            and abs(brightness - sent_brightness.value) >= MANUAL_BRIGHTNESS_THRESHOLD
         ):
             changed.add(PAUSE_BRIGHTNESS)
         return changed
@@ -281,10 +286,15 @@ class RoomLight(LightEntity):
         )
 
     @callback
-    def async_forget_sent(self) -> None:
-        """Forget what was sent to the lights, e.g. once a pause ends."""
+    def async_take_shown(self) -> None:
+        """Compare later changes with what the lights show now."""
         if self._commander is not None:
-            self._commander.async_forget_sent(self._members)
+            self._commander.async_take_shown(self._members)
+
+    @property
+    def turning_on(self) -> bool:
+        """Return True if a turn on of the room waits to be sent."""
+        return self._commander is not None and self._commander.turning_on
 
     def is_own_context(self, context: Context) -> bool:
         """Return True if a context belongs to a command of this room."""

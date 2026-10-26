@@ -2,10 +2,13 @@
 
 from collections import deque
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 import logging
 from typing import Any
 
 from homeassistant.components.light import (
+    ATTR_BRIGHTNESS,
+    ATTR_COLOR_MODE,
     ATTR_COLOR_TEMP_KELVIN,
     ATTR_EFFECT,
     ATTR_EFFECT_LIST,
@@ -21,6 +24,7 @@ from homeassistant.components.light import (
     ATTR_WHITE,
     ATTR_XY_COLOR,
     DOMAIN as LIGHT_DOMAIN,
+    ColorMode,
     color_supported,
 )
 from homeassistant.const import (
@@ -28,6 +32,7 @@ from homeassistant.const import (
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
+    STATE_ON,
 )
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
@@ -45,6 +50,18 @@ COLOR_GROUP_ATTRS = COLOR_ATTRS | {ATTR_COLOR_TEMP_KELVIN, ATTR_WHITE}
 OWN_CONTEXTS = 50
 
 type MemberParams = dict[str, dict[str, Any]]
+
+# Values remembered per light, to tell changes made elsewhere.
+TRACKED_ATTRS = (ATTR_COLOR_TEMP_KELVIN, ATTR_BRIGHTNESS)
+
+
+@dataclass(frozen=True, slots=True)
+class SentValue:
+    """A value a light got, and when it should have reached it."""
+
+    value: float
+    sent_at: float
+    transition: float = 0
 
 
 def reachable_kelvin(kelvin: float, attributes: Mapping[str, Any]) -> int:
@@ -129,9 +146,9 @@ class RoomCommander:
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
         self._own_context_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
-        # When each light last got a turn on, and the last values sent per
-        # attribute, to tell later changes made elsewhere.
-        self.last_sent: dict[str, tuple[float, dict[str, Any]]] = {}
+        # The last color temperature and brightness each light got, to tell
+        # later changes made elsewhere.
+        self.last_sent: dict[str, dict[str, SentValue]] = {}
         self._next_allowed = 0.0
         self._pending: tuple[str, MemberParams, Context | None] | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
@@ -146,6 +163,28 @@ class RoomCommander:
         """Forget what was sent, so later changes are not compared with it."""
         for entity_id in entity_ids:
             self.last_sent.pop(entity_id, None)
+
+    @callback
+    def async_take_shown(self, entity_ids: Iterable[str]) -> None:
+        """Compare later changes with what the lights show now.
+
+        For lights left as someone set them, e.g. when a pause ends.
+        """
+        now = self.hass.loop.time()
+        for entity_id in entity_ids:
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state != STATE_ON:
+                self.last_sent.pop(entity_id, None)
+                continue
+            shown = {}
+            if (
+                state.attributes.get(ATTR_COLOR_MODE) == ColorMode.COLOR_TEMP
+                and (kelvin := state.attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None
+            ):
+                shown[ATTR_COLOR_TEMP_KELVIN] = SentValue(kelvin, now)
+            if (brightness := state.attributes.get(ATTR_BRIGHTNESS)) is not None:
+                shown[ATTR_BRIGHTNESS] = SentValue(brightness, now)
+            self.last_sent[entity_id] = shown
 
     @property
     def turning_off(self) -> bool:
@@ -271,19 +310,7 @@ class RoomCommander:
                 first_error = first_error or err
                 continue
             if service == SERVICE_TURN_ON:
-                sent_at = self.hass.loop.time()
-                for entity_id in entity_ids:
-                    # A call with some attributes keeps what was sent of others.
-                    _, older = self.last_sent.get(entity_id, (0, {}))
-                    older = {
-                        key: value
-                        for key, value in older.items()
-                        if key != ATTR_TRANSITION
-                    }
-                    self.last_sent[entity_id] = (
-                        sent_at,
-                        merge_params(older, call_params),
-                    )
+                self._async_remember_sent(entity_ids, call_params)
             if ATTR_COLOR_TEMP_KELVIN in call_params:
                 for entity_id in entity_ids:
                     self.sent_color_temps[entity_id] = (
@@ -292,6 +319,22 @@ class RoomCommander:
                     )
         if first_error is not None:
             raise first_error
+
+    @callback
+    def _async_remember_sent(
+        self, entity_ids: list[str], call_params: dict[str, Any]
+    ) -> None:
+        """Remember per attribute what lights got, keeping the others."""
+        now = self.hass.loop.time()
+        transition = call_params.get(ATTR_TRANSITION, 0)
+        for entity_id in entity_ids:
+            sent = self.last_sent.setdefault(entity_id, {})
+            if not COLOR_ATTRS.isdisjoint(call_params):
+                # Showing a color now, no color temperature to compare.
+                sent.pop(ATTR_COLOR_TEMP_KELVIN, None)
+            for attr in TRACKED_ATTRS:
+                if attr in call_params:
+                    sent[attr] = SentValue(call_params[attr], now, transition)
 
 
 def turn_off_params(params: dict[str, Any]) -> dict[str, Any]:

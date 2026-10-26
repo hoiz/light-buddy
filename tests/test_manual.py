@@ -1,5 +1,6 @@
 """Tests for respecting manual changes."""
 
+import dataclasses
 import datetime as dt
 from datetime import timedelta
 
@@ -66,6 +67,13 @@ def _curve(kelvin: int) -> tuple[SchedulePoint, ...]:
         SchedulePoint(kelvin, dt.time(0, 0), brightness=50),
         SchedulePoint(kelvin, dt.time(12, 0), brightness=50),
     )
+
+
+def _age_last_sent(hass: HomeAssistant, lamp: str) -> None:
+    """Pretend the last commands to a light were sent a while ago."""
+    sent = _room(hass)._commander.last_sent[lamp]
+    for attr, value in sent.items():
+        sent[attr] = dataclasses.replace(value, sent_at=value.sent_at - 10)
 
 
 def _room(hass: HomeAssistant):
@@ -171,7 +179,6 @@ async def test_changes_outside_home_assistant(
     """A remote changing a light counts, our own reports and small drifts not."""
     automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
     async_mock_service(hass, "light", "turn_on")
-    commander = _room(hass)._commander
     hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
     await hass.async_block_till_done()
     # Sends the target, 4000 K at 50 %.
@@ -182,8 +189,7 @@ async def test_changes_outside_home_assistant(
     await hass.async_block_till_done()
     assert automation.paused == set()
 
-    sent_at, params = commander.last_sent[lamp]
-    commander.last_sent[lamp] = (sent_at - 10, params)
+    _age_last_sent(hass, lamp)
     # Close to the 4000 K at 128 that were sent.
     hass.states.async_set(lamp, STATE_ON, _on(3950, 125), context=Context())
     await hass.async_block_till_done()
@@ -200,13 +206,11 @@ async def test_own_reports_are_not_manual(
     """State reports carrying our own context are not manual changes."""
     automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
     calls = async_mock_service(hass, "light", "turn_on")
-    commander = _room(hass)._commander
     hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
     await hass.async_block_till_done()
     # Sends the target, 4000 K at 50 %.
     await automation.async_resume()
-    sent_at, params = commander.last_sent[lamp]
-    commander.last_sent[lamp] = (sent_at - 10, params)
+    _age_last_sent(hass, lamp)
 
     hass.states.async_set(lamp, STATE_ON, _on(2700), context=calls[0].context)
     await hass.async_block_till_done()
@@ -268,13 +272,6 @@ async def test_resume_button(hass: HomeAssistant, add_light, setup_integration) 
     assert hass.states.get(RESUME).name == "Resume schedule Wohnzimmer"
 
 
-def _age_last_sent(hass: HomeAssistant, lamp: str) -> None:
-    """Pretend the last command to a light was sent a while ago."""
-    commander = _room(hass)._commander
-    sent_at, params = commander.last_sent[lamp]
-    commander.last_sent[lamp] = (sent_at - 10, params)
-
-
 async def test_brightness_pct_by_others(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
@@ -322,7 +319,7 @@ async def test_values_sent_earlier_are_kept(
         )
     )
     await _room(hass).async_apply_target(automation.target, 2, threshold=50)
-    assert _room(hass)._commander.last_sent[lamp][1]["color_temp_kelvin"] == 4000
+    assert _room(hass)._commander.last_sent[lamp]["color_temp_kelvin"].value == 4000
 
     _age_last_sent(hass, lamp)
     hass.states.async_set(lamp, STATE_ON, _on(2700, 204), context=Context())
@@ -455,3 +452,77 @@ async def test_auto_resume(
     await hass.async_block_till_done()
     assert automation.paused == set()
     assert calls[-1].data["color_temp_kelvin"] == 4000
+
+
+async def test_pause_ends_on_tick_if_room_stayed_off(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A pause left from a dropped turn on ends at the next tick."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    hass.states.async_set(lamp, STATE_OFF, WIDE_LIGHT)
+    await hass.async_block_till_done()
+    automation.async_mark_manual({"brightness"})
+
+    await _tick(hass)
+    assert automation.paused == set()
+
+
+async def test_toggle_fading_out_is_not_manual(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A toggle turning a light off with a transition is a fade, not dimming."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "toggle")
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+    await automation.async_resume()
+    _age_last_sent(hass, lamp)
+
+    # A transition from a template arrives as text.
+    await hass.services.async_call(
+        "light", "toggle", {"entity_id": lamp, "transition": "5"}, blocking=True
+    )
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 30), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == set()
+
+
+async def test_after_resume_remote_changes_count(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """After resuming, lights already at the target still notice remotes."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 128))
+    await hass.async_block_till_done()
+    automation.async_mark_manual({"brightness"})
+
+    # Nothing to send, the light shows the target already.
+    await automation.async_resume()
+    _age_last_sent(hass, lamp)
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 30), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == {"brightness"}
+
+
+async def test_older_transition_still_counts(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A long color temperature fade is not cut short by a later command."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    commander = _room(hass)._commander
+    await commander.async_send_now(
+        {lamp: {"color_temp_kelvin": 2700, "transition": 60}}
+    )
+    await commander.async_send_now({lamp: {"brightness": 100}})
+    sent = commander.last_sent[lamp]
+    sent["brightness"] = dataclasses.replace(
+        sent["brightness"], sent_at=sent["brightness"].sent_at - 10
+    )
+
+    # Halfway through the 60 s fade.
+    hass.states.async_set(lamp, STATE_ON, _on(3400, 100), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == set()

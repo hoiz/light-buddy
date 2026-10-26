@@ -213,7 +213,7 @@ class RoomAutomation:
         # Lights left as someone set them would otherwise count as changed
         # again, compared with what was sent before the pause.
         if (light := self.light) is not None:
-            light.async_forget_sent()
+            light.async_take_shown()
         if self.paused:
             self.paused.clear()
             self.paused_since = None
@@ -245,6 +245,14 @@ class RoomAutomation:
         await self._async_apply(TRANSITION_TURN_ON, members)
 
     async def _async_tick(self, _now: dt.datetime) -> None:
+        # In case the room turned off while a turn on was still waiting.
+        if (
+            self.paused
+            and (light := self.light) is not None
+            and not light.is_on
+            and not light.turning_on
+        ):
+            self.async_room_off()
         self._async_update_target()
         await self._async_apply()
 

@@ -133,37 +133,36 @@ class RoomManager:
         """
         service = event.data[ATTR_SERVICE]
         service_data = event.data[ATTR_SERVICE_DATA]
-        attributes = manual_attributes(service_data)
-        if service != SERVICE_TURN_OFF and not attributes:
-            return
+        transition = _seconds(service_data.get(ATTR_TRANSITION))
+        attributes: set[str] = set()
+        if service == SERVICE_TURN_OFF:
+            if not transition:
+                return
+        else:
+            attributes = manual_attributes(service_data)
+            if not attributes and not (service == SERVICE_TOGGLE and transition):
+                return
         # Groups are not expanded: a call to a room light is handled by it.
         selected = async_extract_referenced_entity_ids(
             self.hass, TargetSelection(service_data), expand_group=False
         )
-        entity_ids = [
-            entity_id
-            for entity_id in selected.referenced | selected.indirectly_referenced
-            if entity_id in self._light_rooms
-        ]
-        if service == SERVICE_TOGGLE:
-            # Only lights that the toggle turns on get the values.
-            entity_ids = [
-                entity_id
-                for entity_id in entity_ids
-                if (state := self.hass.states.get(entity_id)) is None
-                or state.state != STATE_ON
-            ]
-        for entity_id in entity_ids:
-            area_id = self._light_rooms[entity_id]
+        for entity_id in selected.referenced | selected.indirectly_referenced:
+            if (area_id := self._light_rooms.get(entity_id)) is None:
+                continue
             light = self._lights.get(area_id)
             if light is not None and light.is_own_context(event.context):
                 continue
-            if service == SERVICE_TURN_OFF:
-                if light is not None:
-                    light.async_member_turning_off(
-                        entity_id, service_data.get(ATTR_TRANSITION, 0)
-                    )
-            elif (automation := self._automations.get(area_id)) is not None:
+            is_on = (
+                state := self.hass.states.get(entity_id)
+            ) is not None and state.state == STATE_ON
+            # A toggle turns lights that are on off.
+            if service == SERVICE_TURN_OFF or (service == SERVICE_TOGGLE and is_on):
+                if light is not None and is_on and transition:
+                    light.async_member_turning_off(entity_id, transition)
+            elif (
+                attributes
+                and (automation := self._automations.get(area_id)) is not None
+            ):
                 automation.async_mark_manual(attributes)
 
     @callback
@@ -489,6 +488,14 @@ def _entity_event_filter(event_data: er.EventEntityRegistryUpdatedData) -> bool:
     return "old_entity_id" in event_data or not REFRESH_FIELDS.isdisjoint(
         event_data["changes"]
     )
+
+
+def _seconds(value: Any) -> float:
+    """Return a transition from service data, which is not validated yet."""
+    try:
+        return max(float(value), 0)
+    except TypeError, ValueError:
+        return 0
 
 
 @callback

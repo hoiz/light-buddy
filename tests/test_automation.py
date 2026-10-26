@@ -252,7 +252,8 @@ async def test_target_follows_time(
     add_light("lamp", area="Wohnzimmer")
     freezer.move_to("2026-10-26 07:15:00-07:00")
     await setup_integration(schedule=True)
-    assert hass.states.get(TARGET).state == "3429"
+    # Between 06:30 and 08:00, after sunrise, the way daylight grows.
+    assert hass.states.get(TARGET).state == "3450"
 
     freezer.move_to("2026-10-26 23:00:00-07:00")
     await _tick(hass)

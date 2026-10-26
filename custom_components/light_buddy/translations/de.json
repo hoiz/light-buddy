@@ -33,7 +33,7 @@
       },
       "schedule": {
         "title": "Zeitplan",
-        "description": "Die Farbtemperatur aller Räume folgt diesem Zeitplan. Zwischen zwei Punkten ändert sie sich gleitend, auch über Mitternacht.\n\n![Kurve]({chart})\n\n{points}\n\nÄnderungen werden mit **Speichern** übernommen.",
+        "description": "Die Farbtemperatur aller Räume folgt diesem Zeitplan. Punkte können der Sonne folgen; zwischen zwei Punkten ändert sich die Farbtemperatur so wie das Tageslicht.\n\n![Kurve]({chart})\n\n{points}\n\nÄnderungen werden mit **Speichern** übernommen.",
         "menu_options": {
           "add_point": "Punkt hinzufügen",
           "edit_point": "Punkt bearbeiten",
@@ -90,12 +90,37 @@
           "disco_interval": "Sekunden bis zur nächsten Farbe. Jeder Farbwechsel sendet einen Befehl pro Farbe, sehr kurze Zeiten belasten also das Zigbee-Netz.",
           "disco_palette": "Die Farben, durch die der Disco-Modus wechselt. Jede Lampe zeigt eine andere."
         }
+      },
+      "anchor": {
+        "title": "Punkt",
+        "description": "Liegt der Punkt auf einer Uhrzeit, oder folgt er der Sonne?",
+        "data": {
+          "anchor": "Bei"
+        }
+      },
+      "sun_point": {
+        "title": "{event}",
+        "description": "Heute ist {event} um {today}. Der Versatz verschiebt den Punkt, das Zeitfenster hält ihn zwischen zwei Uhrzeiten, z. B. Sonnenaufgang nicht vor 06:00 und nicht nach 07:30.",
+        "data": {
+          "offset": "Versatz",
+          "earliest": "Nicht vor",
+          "latest": "Nicht nach",
+          "kelvin": "Farbtemperatur",
+          "weekdays": "Wochentage"
+        },
+        "data_description": {
+          "offset": "Minuten vor (negativ) oder nach dem Sonnenereignis.",
+          "earliest": "Leer lassen für keine Grenze.",
+          "latest": "Leer lassen für keine Grenze.",
+          "weekdays": "Leer lassen für jeden Tag."
+        }
       }
     },
     "error": {
       "duplicate_point": "Zu dieser Uhrzeit gibt es an diesen Tagen schon einen Punkt.",
       "keep_one_point": "Mindestens ein Punkt muss bleiben.",
-      "too_many_points": "Ein Zeitplan hat höchstens 50 Punkte."
+      "too_many_points": "Ein Zeitplan hat höchstens 50 Punkte.",
+      "window_order": "„Nicht vor“ muss früher sein als „Nicht nach“."
     }
   },
   "entity": {
@@ -167,6 +192,14 @@
         "party": "Party",
         "fire": "Feuer",
         "ocean": "Ozean"
+      }
+    },
+    "anchor": {
+      "options": {
+        "time": "Uhrzeit",
+        "sunrise": "Sonnenaufgang",
+        "noon": "Sonnenhöchststand",
+        "sunset": "Sonnenuntergang"
       }
     }
   },

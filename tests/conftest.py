@@ -31,6 +31,22 @@ WHITE_LIGHT = {
 }
 PLUG = {"supported_color_modes": [ColorMode.ONOFF], "supported_features": 0}
 
+# The schedule most tests use: clock times only, so they do not depend on the
+# sun. Coldest at 12:30, 2200 K from 22:30 to 05:30.
+CLOCK_SCHEDULE = [
+    {"anchor": "time", "time": time, "kelvin": kelvin, "weekdays": []}
+    for time, kelvin in (
+        ("05:30", 2200),
+        ("06:30", 3000),
+        ("08:00", 4000),
+        ("12:30", 5000),
+        ("16:00", 4500),
+        ("18:30", 3500),
+        ("21:00", 2700),
+        ("22:30", 2200),
+    )
+]
+
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
@@ -114,9 +130,8 @@ async def setup_integration(
             monkeypatch.setattr(
                 RoomAutomation, "_async_update_target", lambda self: None
             )
-        entry = MockConfigEntry(
-            domain=DOMAIN, title="Light Buddy", options=options or {}
-        )
+        options = {"schedule": CLOCK_SCHEDULE, **(options or {})}
+        entry = MockConfigEntry(domain=DOMAIN, title="Light Buddy", options=options)
         entry.add_to_hass(hass)
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()

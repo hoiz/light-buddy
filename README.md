@@ -63,18 +63,20 @@ More notes:
 
 ## Schedule
 
-Every room follows a color temperature schedule. Between the points, the color temperature changes gradually, also across midnight. The default curve follows daylight and is coldest at noon:
+Every room follows a color temperature schedule. Its points can be at a clock time or follow the sun: sunrise, solar noon or sunset, shifted by an offset and optionally kept within a window of clock times. The sun is computed from the location in Home Assistant's settings; solar noon moves with daylight saving time by itself.
 
-| Time | Color temperature |
+Between two points, the color temperature changes the way daylight does: fast after sunrise and before sunset, slowly around noon. Where the sun does not rise or set all the way between two points, e.g. across midnight, it eases in and out. The change runs in mired, matching how the eye perceives color temperature.
+
+The default curve follows the sun and never gets warmer than 2700 K:
+
+| Point | Color temperature |
 |---|---|
-| 05:30 | 2200 K |
-| 06:30 | 3000 K |
-| 08:00 | 4000 K |
-| 12:30 | 5000 K |
-| 16:00 | 4500 K |
-| 18:30 | 3500 K |
-| 21:00 | 2700 K |
-| 22:30 | 2200 K |
+| Sunrise, not before 06:00 and not after 07:30 | 2700 K |
+| Solar noon | 5000 K |
+| Sunset | 3200 K |
+| Sunset + 1:30, at the latest 22:00 | 2700 K |
+
+At night it holds 2700 K from the last point to the first.
 
 Every room has a **Schedule** switch (`switch.schedule_<area>`). It is on while the room follows the schedule:
 
@@ -97,13 +99,11 @@ How the schedule behaves:
 
 Settings → Devices & services → Light Buddy → **Configure** → **Schedule**. The schedule applies to all rooms.
 
-- The overview shows the curve as a chart and all points as a table. The chart includes changes that are not saved yet; with weekday points, each group of days gets its own line. Its height scale is even in mired, so the line between two points is straight; the Kelvin labels are therefore closer together at the cold end.
-- **Add point** / **Edit point**: time, color temperature and optional weekdays. Without weekdays, a point applies every day; with them you can, for example, set a later morning on weekends.
+- The overview shows the curve as a chart and all points as a table, with today's time of sun points. The chart shows today; thin lines show the longest and the shortest day of the year. It includes changes that are not saved yet; with weekday points, each group of days gets its own line. Its height scale is even in mired, so the Kelvin labels are closer together at the cold end.
+- **Add point** / **Edit point**: first a clock time or a sun event, then its details: the time, or the offset and the optional window ("not before", "not after"); the color temperature; optional weekdays. Without weekdays, a point applies every day; with them you can, for example, set a later morning on weekends.
 - **Delete points**: at least one point has to stay.
-- **Reset to default**: the daylight curve from above.
+- **Reset to default**: the sun curve from above.
 - **Save** stores all changes. They apply right away, without a restart; Schedule switches turned off by manual changes stay off.
-
-Between two points, the color temperature changes evenly in mired, matching how the eye perceives color temperature.
 
 ## Settings
 

@@ -19,6 +19,12 @@ CONF_SCHEDULE: Final = "schedule"
 CONF_TIME: Final = "time"
 CONF_KELVIN: Final = "kelvin"
 CONF_WEEKDAYS: Final = "weekdays"
+# Points at a sun event instead of a clock time, shifted, within a window.
+CONF_ANCHOR: Final = "anchor"
+CONF_SUN_OFFSET: Final = "offset"
+CONF_EARLIEST: Final = "earliest"
+CONF_LATEST: Final = "latest"
+ANCHOR_TIME: Final = "time"
 
 # Global settings.
 CONF_SETTINGS: Final = "settings"

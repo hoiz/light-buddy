@@ -8,9 +8,9 @@ from homeassistant.const import Platform, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
+from .automation import hass_sun
 from .const import SCHEDULE_INTERVAL
 from .manager import TARGET_SENSOR_UNIQUE_ID, LightBuddyConfigEntry, RoomManager
 from .schedule import target_at
@@ -63,7 +63,7 @@ class TargetColorTempSensor(SensorEntity):
         target = target_at(
             self._manager.points,
             dt_util.now(),
-            lambda event, day: get_astral_event_date(self.hass, event, day),
+            hass_sun(self.hass),
         )
         self._attr_native_value = target.kelvin if target else None
 

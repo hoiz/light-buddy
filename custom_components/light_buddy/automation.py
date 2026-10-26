@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, Self
 from homeassistant.components.light import ATTR_COLOR_NAME, ATTR_PROFILE
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
-from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -30,7 +29,7 @@ from .const import (
 )
 from .disco import DiscoSettings, RoomDisco
 from .room import COLOR_GROUP_ATTRS
-from .schedule import DEFAULT_SCHEDULE, SchedulePoint, Target, target_at
+from .schedule import DEFAULT_SCHEDULE, SchedulePoint, Sun, Target, target_at
 
 if TYPE_CHECKING:
     from .light import RoomLight
@@ -76,6 +75,12 @@ class ScheduleSettings:
                 CONF_SEPARATE_COMMANDS, defaults.separate_commands
             ),
         )
+
+
+def hass_sun(hass: HomeAssistant) -> Sun:
+    """Return the sun at the location of Home Assistant."""
+    config = hass.config
+    return Sun(config.latitude, config.longitude, config.elevation)
 
 
 def sets_color(params: Mapping[str, Any]) -> bool:
@@ -383,13 +388,10 @@ class RoomAutomation:
 
     @callback
     def _async_update_target(self) -> None:
-        target = target_at(self.points, dt_util.now(), self._sun_time)
+        target = target_at(self.points, dt_util.now(), hass_sun(self.hass))
         if target != self.target:
             self.target = target
             self.async_notify()
-
-    def _sun_time(self, event: str, day: dt.date) -> dt.datetime | None:
-        return get_astral_event_date(self.hass, event, day)
 
     @callback
     def async_notify(self) -> None:

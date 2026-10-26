@@ -51,27 +51,39 @@ async def test_options_flow(hass: HomeAssistant, add_light, setup_integration) -
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    assert entry.options == {
-        CONF_EXCLUDED_AREAS: ["bad"],
-        CONF_EXCLUDED_LIGHTS: [lamp],
-    }
+    assert entry.options[CONF_EXCLUDED_AREAS] == ["bad"]
+    assert entry.options[CONF_EXCLUDED_LIGHTS] == [lamp]
     assert hass.states.get("light.all_bad") is None
     assert hass.states.get("light.all_wohnzimmer") is None
 
     result = await _open(hass, entry, "rooms")
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     await hass.async_block_till_done()
-    assert entry.options == {CONF_EXCLUDED_AREAS: [], CONF_EXCLUDED_LIGHTS: []}
+    assert entry.options[CONF_EXCLUDED_AREAS] == []
+    assert entry.options[CONF_EXCLUDED_LIGHTS] == []
     assert hass.states.get("light.all_bad") is not None
 
 
-async def _schedule(hass: HomeAssistant, entry, flow_id: str, step_id: str, data=None):
-    """Pick a schedule menu entry, and submit its form if data is given."""
-    result = await hass.config_entries.options.async_configure(
-        flow_id, {"next_step_id": step_id}
-    )
+async def _schedule(
+    hass: HomeAssistant,
+    entry,
+    flow_id: str,
+    step_id: str,
+    data=None,
+    anchor: str = "time",
+):
+    """Pick a schedule menu entry, and submit its form if data is given.
+
+    Points are at the anchor, a clock time unless given.
+    """
+    configure = hass.config_entries.options.async_configure
+    result = await configure(flow_id, {"next_step_id": step_id})
+    if result.get("step_id") == "anchor":
+        result = await configure(flow_id, {"anchor": anchor})
     if data is not None:
-        result = await hass.config_entries.options.async_configure(flow_id, data)
+        result = await configure(flow_id, data)
+        if result.get("step_id") == "anchor":
+            result = await configure(flow_id, {"anchor": anchor})
     return result
 
 
@@ -111,7 +123,7 @@ async def test_schedule_add_edit_delete(
         "/api/light_buddy/curve.svg?points="
         in result["description_placeholders"]["chart"]
     )
-    assert "1400-4800-56" in result["description_placeholders"]["chart"]
+    assert "1400_k4800_d56" in result["description_placeholders"]["chart"]
 
     # The default has 8 points, sorted by time: 12:30 is the 4th, 14:00 the 5th.
     result = await _schedule(hass, entry, flow_id, "edit_point", {"point": "4"})
@@ -145,6 +157,7 @@ async def test_schedule_add_edit_delete(
         "22:30",
     ]
     assert schedule[3] == {
+        "anchor": "time",
         "time": "14:00",
         "kelvin": 4700,
         "weekdays": [],
@@ -222,7 +235,8 @@ async def test_schedule_reset_and_cancel(
     result = await _schedule(hass, entry, flow_id, "reset_schedule", {"confirm": False})
     assert "| 07:00 | 5000 K |" in result["description_placeholders"]["points"]
     result = await _schedule(hass, entry, flow_id, "reset_schedule", {"confirm": True})
-    assert "| 12:30 | 5000 K |" in result["description_placeholders"]["points"]
+    # The default follows the sun.
+    assert "| Solar noon (today " in result["description_placeholders"]["points"]
 
     # Leaving without saving keeps the stored schedule.
     hass.config_entries.options.async_abort(flow_id)
@@ -287,3 +301,73 @@ async def test_schedule_point_limit(
         {"time": "20:00:00", "kelvin": 3000},
     )
     assert result["errors"] == {"base": "too_many_points"}
+
+
+async def test_sun_points(hass: HomeAssistant, add_light, setup_integration) -> None:
+    """Sun points get an offset and a window, and can be edited."""
+    add_light("lamp", area="Wohnzimmer")
+    entry = await setup_integration(
+        {
+            "schedule": [
+                {"anchor": "time", "time": "12:00", "kelvin": 5000, "weekdays": []}
+            ]
+        }
+    )
+    result = await _open(hass, entry, "schedule")
+    flow_id = result["flow_id"]
+
+    result = await _schedule(hass, entry, flow_id, "add_point", anchor="sunset")
+    assert result["step_id"] == "sun_point"
+    assert result["description_placeholders"]["event"] == "Sunset"
+    # A window the wrong way round.
+    result = await hass.config_entries.options.async_configure(
+        flow_id,
+        {"offset": 90, "earliest": "23:00:00", "latest": "22:00:00", "kelvin": 2700},
+    )
+    assert result["errors"] == {"base": "window_order"}
+    result = await hass.config_entries.options.async_configure(
+        flow_id, {"offset": 90, "latest": "22:00:00", "kelvin": 2700}
+    )
+    assert result["step_id"] == "schedule"
+    assert (
+        "| Sunset + 1:30 (until 22:00, today "
+        in (result["description_placeholders"]["points"])
+    )
+    assert "s%2B90_w-2200_k2700" in result["description_placeholders"]["chart"]
+
+    # Points are sorted by their typical time: the sun point is the 2nd.
+    result = await _schedule(
+        hass, entry, flow_id, "edit_point", {"point": "1"}, anchor="sunset"
+    )
+    assert result["step_id"] == "sun_point"
+    assert _suggested(result) == {
+        "offset": 90,
+        "latest": "22:00:00",
+        "kelvin": 2700,
+        "weekdays": [],
+    }
+    result = await hass.config_entries.options.async_configure(
+        flow_id, {"offset": 90, "latest": "22:00:00", "kelvin": 2700}
+    )
+    assert result["step_id"] == "schedule"
+
+    result = await hass.config_entries.options.async_configure(
+        flow_id, {"next_step_id": "save_schedule"}
+    )
+    await hass.async_block_till_done()
+    assert entry.options["schedule"][1] == {
+        "anchor": "sunset",
+        "offset": 90,
+        "earliest": None,
+        "latest": "22:00",
+        "kelvin": 2700,
+        "weekdays": [],
+    }
+
+    # Turned into a clock point, it keeps its color temperature.
+    result = await _open(hass, entry, "schedule")
+    result = await _schedule(
+        hass, entry, result["flow_id"], "edit_point", {"point": "1"}
+    )
+    assert result["step_id"] == "point"
+    assert _suggested(result) == {"kelvin": 2700, "weekdays": []}

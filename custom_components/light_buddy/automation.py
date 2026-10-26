@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 import datetime as dt
 import hashlib
@@ -42,12 +43,20 @@ class RoomAutomation:
         hass: HomeAssistant,
         area_id: str,
         get_light: Callable[[], RoomLight | None],
+        enabled: bool,
+        store_enabled: Callable[[str, bool], None],
     ) -> None:
-        """Initialize the automation."""
+        """Initialize the automation.
+
+        Whether the schedule is on is stored in the config entry, so it holds
+        even while the schedule switch is disabled.
+        """
         self.hass = hass
         self.area_id = area_id
         self._get_light = get_light
-        self.enabled = True
+        self.enabled = enabled
+        self._store_enabled = store_enabled
+        self._first_tick: asyncio.Task[None] | None = None
         self.points: tuple[SchedulePoint, ...] = DEFAULT_SCHEDULE
         self.target: Target | None = None
         self._listeners: list[CALLBACK_TYPE] = []
@@ -85,7 +94,9 @@ class RoomAutomation:
                     self.hass, self._async_tick, SCHEDULE_INTERVAL
                 )
             )
-            self.hass.async_create_task(self._async_tick(dt_util.utcnow()))
+            self._first_tick = self.hass.async_create_task(
+                self._async_tick(dt_util.utcnow())
+            )
 
         self._unsubs.append(async_call_later(self.hass, offset, _async_start_interval))
 
@@ -94,6 +105,9 @@ class RoomAutomation:
         """Stop following the schedule."""
         while self._unsubs:
             self._unsubs.pop()()
+        if self._first_tick is not None:
+            self._first_tick.cancel()
+            self._first_tick = None
         if self._unsub_turned_on is not None:
             self._unsub_turned_on()
             self._unsub_turned_on = None
@@ -107,6 +121,7 @@ class RoomAutomation:
     async def async_set_enabled(self, enabled: bool) -> None:
         """Turn the schedule on or off, and apply it right away when on."""
         self.enabled = enabled
+        self._store_enabled(self.area_id, enabled)
         self._async_notify()
         if enabled:
             await self._async_apply()

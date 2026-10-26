@@ -104,3 +104,17 @@ def test_daylight_saving_change() -> None:
     # 500 and 333.3 mired, halfway is 416.7 mired.
     assert target_at(points, halfway.astimezone(TZ)) == Target(2400)
     assert target_at(points, _at(4, 0, day)) == Target(3000)
+
+
+def test_brightness_on_some_days_only() -> None:
+    """Brightness points on weekdays carry over the weekend."""
+    weekdays = frozenset(range(5))
+    points = [
+        SchedulePoint(3000, dt.time(6, 0)),
+        SchedulePoint(4000, dt.time(18, 0)),
+        SchedulePoint(4000, dt.time(8, 0), brightness=100, weekdays=weekdays),
+        SchedulePoint(4000, dt.time(20, 0), brightness=40, weekdays=weekdays),
+    ]
+    saturday = MONDAY + dt.timedelta(days=5)
+    # Between Friday 20:00 and Monday 08:00.
+    assert 40 < target_at(points, _at(12, 0, saturday)).brightness < 100

@@ -75,14 +75,12 @@ def target_at(
             break
     else:
         return None
-    brightness = _interpolate(
-        [
-            (when, point.brightness)
-            for when, point in occurrences
-            if point.brightness is not None
-        ],
-        now,
-    )
+    brightness = _interpolate_brightness(occurrences, now)
+    if brightness is None and search_days < SEARCH_DAYS:
+        # Brightness may come from fewer points than color temperature.
+        brightness = _interpolate_brightness(
+            _occurrences(points, now, sun_time, SEARCH_DAYS), now
+        )
     return Target(
         round(MIRED / kelvin), None if brightness is None else round(brightness)
     )
@@ -118,6 +116,19 @@ def _occurrences(
             occurrences.append((when.astimezone(dt.UTC), point))
     occurrences.sort(key=lambda occurrence: occurrence[0])
     return occurrences
+
+
+def _interpolate_brightness(
+    occurrences: Sequence[tuple[dt.datetime, SchedulePoint]], now: dt.datetime
+) -> float | None:
+    return _interpolate(
+        [
+            (when, point.brightness)
+            for when, point in occurrences
+            if point.brightness is not None
+        ],
+        now,
+    )
 
 
 def _interpolate(

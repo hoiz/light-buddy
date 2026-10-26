@@ -27,6 +27,7 @@ from .const import (
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
     CONF_OFFSETS,
+    CONF_SCHEDULES_OFF,
     MEMBERSHIP_DEBOUNCE_SECONDS,
 )
 from .membership import async_resolve_rooms
@@ -189,9 +190,23 @@ class RoomManager:
                     self.hass,
                     area_id,
                     lambda area_id=area_id: self._lights.get(area_id),
+                    area_id not in self.entry.options.get(CONF_SCHEDULES_OFF, ()),
+                    self._async_store_schedule_enabled,
                 )
                 self._automations[area_id] = automation
                 automation.async_start()
+
+    @callback
+    def _async_store_schedule_enabled(self, area_id: str, enabled: bool) -> None:
+        schedules_off = set(self.entry.options.get(CONF_SCHEDULES_OFF, ()))
+        if enabled:
+            schedules_off.discard(area_id)
+        else:
+            schedules_off.add(area_id)
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={**self.entry.options, CONF_SCHEDULES_OFF: sorted(schedules_off)},
+        )
 
     @callback
     def _async_stop_automations(self) -> None:

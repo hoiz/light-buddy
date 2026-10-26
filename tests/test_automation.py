@@ -1,5 +1,6 @@
 """Tests for following the schedule."""
 
+import datetime as dt
 from datetime import timedelta
 
 from freezegun.api import FrozenDateTimeFactory
@@ -7,12 +8,12 @@ import pytest
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
-    mock_restore_cache,
 )
 
+from custom_components.light_buddy.schedule import SchedulePoint
 from homeassistant.components.light import DATA_COMPONENT, ColorMode
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
-from homeassistant.core import Context, HomeAssistant, State
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -203,14 +204,54 @@ async def test_schedule_switch(
     assert [call.data["color_temp_kelvin"] for call in calls] == [5000]
 
 
-async def test_schedule_switch_is_restored(
+async def test_schedule_switch_is_stored(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
-    """The schedule stays off across restarts."""
-    mock_restore_cache(hass, [State(SCHEDULE, STATE_OFF)])
+    """Whether the schedule is on is kept in the config entry.
+
+    So it holds across restarts, also while the switch entity is disabled.
+    """
     add_light("lamp", area="Wohnzimmer")
-    await setup_integration(schedule=True)
+    entry = await setup_integration({"schedules_off": ["wohnzimmer"]}, schedule=True)
     assert hass.states.get(SCHEDULE).state == STATE_OFF
+
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": SCHEDULE}, blocking=True
+    )
+    assert entry.options["schedules_off"] == []
+    await hass.services.async_call(
+        "switch", "turn_off", {"entity_id": SCHEDULE}, blocking=True
+    )
+    assert entry.options["schedules_off"] == ["wohnzimmer"]
+
+
+async def test_brightness_leaves_colored_lights_alone(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A schedule with brightness does not dim lights showing a color."""
+    # At its maximum of 4000 K, as close to the target as it gets.
+    white = add_light(
+        "white", area="Wohnzimmer", state=STATE_ON, attributes=_on(COLOR_LIGHT, 4000)
+    )
+    add_light(
+        "red",
+        area="Wohnzimmer",
+        state=STATE_ON,
+        attributes={**COLOR_LIGHT, "color_mode": ColorMode.XY, "brightness": 255},
+    )
+    entry = await setup_integration(schedule=True)
+    automation = entry.runtime_data._automations["wohnzimmer"]
+    automation.points = (
+        SchedulePoint(5000, dt.time(0, 0), brightness=30),
+        SchedulePoint(5000, dt.time(12, 0), brightness=30),
+    )
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    await _tick(hass)
+    assert [call.data for call in calls] == [
+        # 30 % as Home Assistant converts it.
+        {"entity_id": [white], "brightness": 76, "transition": 2}
+    ]
 
 
 async def test_target_follows_time(

@@ -11,6 +11,8 @@ CONF_EXCLUDED_LIGHTS: Final = "excluded_lights"
 CONF_OFFSETS: Final = "offsets"
 CONF_OFFSET_UNIT: Final = "unit"
 CONF_OFFSET_VALUE: Final = "value"
+# Areas whose schedule is turned off.
+CONF_SCHEDULES_OFF: Final = "schedules_off"
 
 UNIT_KELVIN: Final = "K"
 UNIT_MIRED: Final = "mired"

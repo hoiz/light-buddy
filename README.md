@@ -74,15 +74,15 @@ Jeder Raum folgt einem Zeitplan für die Farbtemperatur. Zwischen den Zeitpunkte
 
 Pro Raum gibt es:
 
-- **Zeitplan** (`switch.schedule_<bereich>`): schaltet den Zeitplan für den Raum ein oder aus.
+- **Zeitplan** (`switch.schedule_<bereich>`): schaltet den Zeitplan für den Raum ein oder aus. Der Zustand bleibt auch über Neustarts erhalten.
 - **Ziel-Farbtemperatur** (`sensor.target_color_temperature_<bereich>`): der aktuelle Zielwert, z. B. für eigene Automationen.
 
 So verhält sich der Zeitplan:
 
-- **Einschalten über das Raum-Licht:** Ausgeschaltete Lampen gehen direkt mit dem Zielwert an, ohne vorher die alte Farbe zu zeigen. Mit einer eigenen Farbe (z. B. aus einer Szene) bleibt die Farbe unverändert.
+- **Einschalten über das Raum-Licht:** Ausgeschaltete Lampen gehen direkt mit dem Zielwert an, ohne vorher die alte Farbe zu zeigen. Mit einer eigenen Farbe (z. B. aus einer Szene) bleibt die Farbe unverändert. Eine eigene Farbtemperatur setzt der Zeitplan derzeit bei der nächsten Anpassung zurück; das Erkennen manueller Änderungen folgt.
 - **Einschalten an der Lampe selbst oder per Wandschalter:** Die Lampe bekommt den Zielwert innerhalb von etwa einer Sekunde.
 - **Laufende Anpassung:** Jede Minute bekommen eingeschaltete Lampen den Zielwert mit einem kurzen Übergang von 2 s. Gesendet wird nur, wenn die Lampe mindestens 50 K davon entfernt ist. Die Räume sind dabei über die Minute verteilt.
-- **Farbige Lampen:** Lampen, die gerade eine Farbe zeigen, lässt der Zeitplan in Ruhe.
+- **Farbige Lampen:** Lampen, die gerade eine Farbe zeigen, lässt der Zeitplan ganz in Ruhe, auch bei der Helligkeit.
 - **Offsets:** Farbtemperatur-Offsets gelten auch für den Zeitplan.
 
 ## Verhalten

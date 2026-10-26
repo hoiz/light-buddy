@@ -33,7 +33,7 @@
       },
       "schedule": {
         "title": "Schedule",
-        "description": "The color temperature of all rooms follows this schedule. Between two points it changes gradually, also across midnight.\n\n{points}\n\nChanges are stored with **Save**.",
+        "description": "The color temperature of all rooms follows this schedule. Between two points it changes gradually, also across midnight.\n\n![Curve]({chart})\n\n{points}\n\nChanges are stored with **Save**.",
         "menu_options": {
           "add_point": "Add point",
           "edit_point": "Edit point",
@@ -94,7 +94,8 @@
     },
     "error": {
       "duplicate_point": "There is already a point at this time on these days.",
-      "keep_one_point": "At least one point has to stay."
+      "keep_one_point": "At least one point has to stay.",
+      "too_many_points": "A schedule has at most 50 points."
     }
   },
   "entity": {

@@ -2,6 +2,7 @@
 
 import datetime as dt
 from typing import Any, override
+from urllib.parse import urlencode
 
 import probatio
 
@@ -16,6 +17,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .automation import ScheduleSettings
+from .chart import MAX_POINTS, URL as CHART_URL, encode_points
 from .const import (
     CONF_AUTO_RESUME_MINUTES,
     CONF_DISCO_INTERVAL,
@@ -149,7 +151,8 @@ class LightBuddyOptionsFlow(OptionsFlow):
                 "save_schedule",
             ],
             description_placeholders={
-                "points": format_table(self.points, self.hass.config.language)
+                "chart": f"{CHART_URL}?{urlencode({'points': encode_points(self.points), 'lang': self.hass.config.language})}",
+                "points": format_table(self.points, self.hass.config.language),
             },
         )
 
@@ -188,6 +191,9 @@ class LightBuddyOptionsFlow(OptionsFlow):
             ]
             if any(same_slot(point, other) for other in others):
                 errors["base"] = "duplicate_point"
+            elif len(others) >= MAX_POINTS:
+                # The chart shows no more.
+                errors["base"] = "too_many_points"
             else:
                 self._points = sort_points([*others, point])
                 return await self.async_step_schedule()

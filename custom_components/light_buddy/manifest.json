@@ -3,7 +3,7 @@
   "name": "Light Buddy",
   "codeowners": [],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["http"],
   "documentation": "https://github.com/hoiz/light-buddy",
   "integration_type": "service",
   "iot_class": "calculated",

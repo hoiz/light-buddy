@@ -4,11 +4,23 @@ import logging
 
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers.typing import ConfigType
 
+from .chart import CurveChartView
+from .const import DOMAIN
 from .manager import LightBuddyConfigEntry, RoomManager, offset_entity_classes
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Serve the chart of the options flow, also while the entry fails."""
+    hass.http.register_view(CurveChartView)
+    return True
+
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,

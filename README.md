@@ -97,7 +97,7 @@ How the schedule behaves:
 
 Settings → Devices & services → Light Buddy → **Configure** → **Schedule**. The schedule applies to all rooms.
 
-- The overview shows all points as a table.
+- The overview shows the curve as a chart and all points as a table. The chart includes changes that are not saved yet; with weekday points, each group of days gets its own line. Its height scale is even in mired, so the line between two points is straight; the Kelvin labels are therefore closer together at the cold end.
 - **Add point** / **Edit point**: time, color temperature and optional weekdays. Without weekdays, a point applies every day; with them you can, for example, set a later morning on weekends.
 - **Delete points**: at least one point has to stay.
 - **Reset to default**: the daylight curve from above.

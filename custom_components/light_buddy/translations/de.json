@@ -33,7 +33,7 @@
       },
       "schedule": {
         "title": "Zeitplan",
-        "description": "Die Farbtemperatur aller Räume folgt diesem Zeitplan. Zwischen zwei Punkten ändert sie sich gleitend, auch über Mitternacht.\n\n{points}\n\nÄnderungen werden mit **Speichern** übernommen.",
+        "description": "Die Farbtemperatur aller Räume folgt diesem Zeitplan. Zwischen zwei Punkten ändert sie sich gleitend, auch über Mitternacht.\n\n![Kurve]({chart})\n\n{points}\n\nÄnderungen werden mit **Speichern** übernommen.",
         "menu_options": {
           "add_point": "Punkt hinzufügen",
           "edit_point": "Punkt bearbeiten",
@@ -94,7 +94,8 @@
     },
     "error": {
       "duplicate_point": "Zu dieser Uhrzeit gibt es an diesen Tagen schon einen Punkt.",
-      "keep_one_point": "Mindestens ein Punkt muss bleiben."
+      "keep_one_point": "Mindestens ein Punkt muss bleiben.",
+      "too_many_points": "Ein Zeitplan hat höchstens 50 Punkte."
     }
   },
   "entity": {

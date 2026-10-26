@@ -106,6 +106,12 @@ async def test_schedule_add_edit_delete(
         "| 14:00 | 4800 K | Sat, Sun |"
         in (result["description_placeholders"]["points"])
     )
+    # The chart shows the point before it is saved.
+    assert (
+        "/api/light_buddy/curve.svg?points="
+        in result["description_placeholders"]["chart"]
+    )
+    assert "1400-4800-56" in result["description_placeholders"]["chart"]
 
     # The default has 8 points, sorted by time: 12:30 is the 4th, 14:00 the 5th.
     result = await _schedule(hass, entry, flow_id, "edit_point", {"point": "4"})
@@ -257,3 +263,27 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
         "disco_interval": 2,
         "disco_palette": "party",
     }
+
+
+async def test_schedule_point_limit(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A schedule has at most as many points as the chart shows."""
+    add_light("lamp", area="Wohnzimmer")
+    entry = await setup_integration(
+        {
+            "schedule": [
+                {"time": f"{minute // 60:02d}:{minute % 60:02d}", "kelvin": 3000}
+                for minute in range(0, 50 * 10, 10)
+            ]
+        }
+    )
+    result = await _open(hass, entry, "schedule")
+    result = await _schedule(
+        hass,
+        entry,
+        result["flow_id"],
+        "add_point",
+        {"time": "20:00:00", "kelvin": 3000},
+    )
+    assert result["errors"] == {"base": "too_many_points"}

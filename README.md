@@ -125,3 +125,16 @@ python3.14 -m venv .venv
 .venv/bin/pytest
 .venv/bin/ruff check .
 ```
+
+### Icon
+
+Das Icon liegt als SVG in `assets/icon.svg`. Neu rendern (macOS, nutzt QuickLook):
+
+```sh
+.venv/bin/python assets/render_icon.py assets/icon.svg
+cp assets/icon.256.png custom_components/light_buddy/brand/icon.png
+cp assets/icon.512.png custom_components/light_buddy/brand/icon@2x.png
+```
+
+Home Assistant zeigt die Bilder aus `custom_components/light_buddy/brand/` direkt an.
+

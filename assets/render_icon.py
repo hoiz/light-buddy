@@ -1,7 +1,8 @@
 """Render SVGs with QuickLook on black and white, and compute transparency."""
+
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 from PIL import Image
 
@@ -13,10 +14,13 @@ def render(svg: Path) -> Image.Image:
         colored = svg.with_name(f"{svg.stem}_{bg}.svg")
         fill = "#000000" if bg == "black" else "#FFFFFF"
         head, _, rest = text.partition(">")
-        colored.write_text(f'{head}><rect width="512" height="512" fill="{fill}"/>{rest}')
+        colored.write_text(
+            f'{head}><rect width="512" height="512" fill="{fill}"/>{rest}'
+        )
         subprocess.run(
             ["qlmanage", "-t", "-s", "1024", "-o", str(svg.parent), str(colored)],
-            capture_output=True, check=True,
+            capture_output=True,
+            check=True,
         )
         out[bg] = Image.open(f"{colored}.png").convert("RGB")
     black, white = out["black"], out["white"]
@@ -26,9 +30,11 @@ def render(svg: Path) -> Image.Image:
         for x in range(black.width):
             b, w = bp[x, y], wp[x, y]
             alpha = max(0, min(255, 255 - max(w[i] - b[i] for i in range(3))))
-            op[x, y] = (0, 0, 0, 0) if alpha == 0 else tuple(
-                min(255, round(b[i] * 255 / alpha)) for i in range(3)
-            ) + (alpha,)
+            if alpha == 0:
+                op[x, y] = (0, 0, 0, 0)
+            else:
+                color = (min(255, round(b[i] * 255 / alpha)) for i in range(3))
+                op[x, y] = (*color, alpha)
     return image
 
 

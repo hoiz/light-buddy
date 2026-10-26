@@ -102,6 +102,26 @@ async def test_tick_updates_lights_that_are_on(
     ]
 
 
+async def test_tick_limits_target_to_range(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light without an offset gets the target limited to its range.
+
+    Home Assistant passes values outside the range on, which some lights ignore.
+    """
+    limited = add_light(
+        "limited", area="Wohnzimmer", state=STATE_ON, attributes=_on(COLOR_LIGHT, 3000)
+    )
+    await setup_integration(schedule=True)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    await _tick(hass)
+
+    assert [call.data for call in calls] == [
+        {"entity_id": [limited], "color_temp_kelvin": 4000, "transition": 2}
+    ]
+
+
 async def test_turn_on_through_room_uses_target(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
@@ -115,7 +135,7 @@ async def test_turn_on_through_room_uses_target(
 
     await room.async_turn_on()
     assert [call.data for call in calls] == [
-        {"entity_id": [off_a, off_b], "color_temp_kelvin": 5000}
+        {"entity_id": [off_a, off_b], "color_temp_kelvin": 4000}
     ]
 
     await room.async_turn_on(brightness=100)
@@ -123,7 +143,7 @@ async def test_turn_on_through_room_uses_target(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
     await hass.async_block_till_done()
     assert [call.data for call in calls][1:] == [
-        {"entity_id": [off_a, off_b], "brightness": 100, "color_temp_kelvin": 5000},
+        {"entity_id": [off_a, off_b], "brightness": 100, "color_temp_kelvin": 4000},
         {"entity_id": [on], "brightness": 100},
     ]
 
@@ -158,7 +178,7 @@ async def test_light_turned_on_elsewhere(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
     await hass.async_block_till_done()
     assert [call.data for call in calls] == [
-        {"entity_id": [lamp], "color_temp_kelvin": 5000, "transition": 1}
+        {"entity_id": [lamp], "color_temp_kelvin": 4000, "transition": 1}
     ]
 
 
@@ -174,7 +194,7 @@ async def test_own_turn_on_is_not_corrected(
     room.async_set_context(context)
 
     await room.async_turn_on()
-    hass.states.async_set(lamp, STATE_ON, _on(COLOR_LIGHT, 5000), context=context)
+    hass.states.async_set(lamp, STATE_ON, _on(COLOR_LIGHT, 4000), context=context)
     await hass.async_block_till_done()
     assert len(calls) == 1
 
@@ -198,7 +218,7 @@ async def test_schedule_switch(
     await hass.services.async_call(
         "switch", "turn_on", {"entity_id": SCHEDULE}, blocking=True
     )
-    assert [call.data["color_temp_kelvin"] for call in calls] == [5000]
+    assert [call.data["color_temp_kelvin"] for call in calls] == [4000]
 
 
 async def test_schedule_switch_is_stored(

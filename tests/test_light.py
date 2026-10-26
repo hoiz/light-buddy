@@ -304,7 +304,7 @@ async def test_offset_applies_and_is_hidden(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
     """Offsets shift the sent color temperature, the room shows the requested one."""
-    plain = add_light("plain", area="Wohnzimmer", attributes=WHITE_LIGHT)
+    plain = add_light("plain", area="Wohnzimmer", attributes=COLOR_LIGHT)
     cold = add_light("cold", area="Wohnzimmer")
     clamped = add_light("clamped", area="Wohnzimmer", attributes=COLOR_LIGHT)
     await setup_integration(
@@ -327,7 +327,7 @@ async def test_offset_applies_and_is_hidden(
 
     on = {"color_mode": ColorMode.COLOR_TEMP, "brightness": 100}
     hass.states.async_set(
-        plain, STATE_ON, {**WHITE_LIGHT, **on, "color_temp_kelvin": 2600}
+        plain, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 2600}
     )
     hass.states.async_set(
         cold, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 2304}
@@ -342,7 +342,7 @@ async def test_offset_applies_and_is_hidden(
     hass.states.async_set(
         cold, STATE_ON, {**COLOR_LIGHT, **on, "color_temp_kelvin": 3700}
     )
-    hass.states.async_set(plain, STATE_OFF, WHITE_LIGHT)
+    hass.states.async_set(plain, STATE_OFF, COLOR_LIGHT)
     hass.states.async_set(clamped, STATE_OFF, COLOR_LIGHT)
     await hass.async_block_till_done()
     assert hass.states.get(ROOM).attributes["color_temp_kelvin"] == 4000

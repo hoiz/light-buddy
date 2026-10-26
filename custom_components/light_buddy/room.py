@@ -95,19 +95,20 @@ def async_split_turn_on(
     Lights that receive identical params share one service call. Colors only go
     to lights that support color, because Home Assistant would otherwise turn a
     color into some color temperature on white lights. Lights with an offset
-    get their own color temperature.
+    get their own color temperature. Color temperatures are limited to each
+    light's range, since Home Assistant passes them on unchanged and some
+    lights, e.g. Elgato, ignore values outside of it.
     """
     calls: list[tuple[list[str], dict[str, Any]]] = []
     for entity_id, requested in member_params.items():
         params = dict(requested)
         state = hass.states.get(entity_id)
-        if (
-            ATTR_COLOR_TEMP_KELVIN in params
-            and (offset := offsets.get(entity_id)) is not None
-        ):
+        if ATTR_COLOR_TEMP_KELVIN in params:
+            kelvin = params[ATTR_COLOR_TEMP_KELVIN]
+            if (offset := offsets.get(entity_id)) is not None:
+                kelvin = offset.apply(kelvin)
             params[ATTR_COLOR_TEMP_KELVIN] = reachable_kelvin(
-                offset.apply(params[ATTR_COLOR_TEMP_KELVIN]),
-                state.attributes if state is not None else {},
+                kelvin, state.attributes if state is not None else {}
             )
         if state is not None:
             if not color_supported(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)):

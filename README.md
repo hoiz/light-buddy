@@ -90,6 +90,7 @@ How the schedule behaves:
 - **Colored lights:** lights that currently show a color are left alone.
 - **Brightness:** the schedule only changes the color temperature. The brightness is up to you.
 - **Offsets:** color temperature offsets apply to the schedule, too.
+- **Range:** a light that cannot reach the target gets the closest value it supports, e.g. 2900 K for an Elgato Key Light when the target is 2200 K.
 
 ## Editing the schedule
 

@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+import pytest
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
@@ -9,7 +10,8 @@ from pytest_homeassistant_custom_component.common import (
 
 from homeassistant.components.light import DATA_COMPONENT
 from homeassistant.const import STATE_OFF, STATE_ON
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -167,3 +169,44 @@ async def test_newer_command_replaces_waiting_brightness(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))
     await hass.async_block_till_done()
     assert [call.data.get("brightness") for call in calls] == [None, 50]
+
+
+async def test_own_turn_off_report_keeps_waiting_brightness(
+    hass: HomeAssistant, add_light, setup_integration, freezer
+) -> None:
+    """A late off report of our own earlier turn off is no wall switch."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    calls = async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    room = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")
+    commander = room._commander
+    hass.states.async_set(ikea, STATE_ON, COLOR_LIGHT)
+    await commander._async_send("turn_off", {ikea: {}}, None)
+    off_context = commander._own_context_ids[-1]
+
+    await commander.async_send_now(
+        {ikea: {"brightness": 100, "color_temp_kelvin": 3000}}
+    )
+    freezer.tick(0.1)
+    hass.states.async_set(ikea, STATE_OFF, COLOR_LIGHT, context=Context(id=off_context))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert calls[-1].data == {"entity_id": [ikea], "brightness": 100}
+
+
+async def test_no_waiting_task_without_lights(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """When every color fails, nothing waits to send a brightness."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+
+    async def fail(call) -> None:
+        raise HomeAssistantError("unreachable")
+
+    hass.services.async_register("light", "turn_on", fail)
+    commander = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")._commander
+    with pytest.raises(HomeAssistantError):
+        await commander.async_send_now(
+            {ikea: {"brightness": 100, "color_temp_kelvin": 3000}}
+        )
+    assert commander._later == {}

@@ -231,7 +231,7 @@ class RoomLight(LightEntity):
             and now >= self._member_turning_off_until.get(entity_id, 0)
             and (attributes := self._changed_elsewhere(new_state, now))
         ):
-            automation.async_mark_manual(attributes)
+            automation.async_mark_manual(attributes, command=False)
         elif (
             self._automation is not None
             and self._commander is not None

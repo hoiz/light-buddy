@@ -412,12 +412,13 @@ class RoomCommander:
                 },
                 sent_at,
             )
-            task = self.hass.async_create_background_task(
-                self._async_send_later(waiting, delay, member_params, context),
-                "light_buddy_separate_commands",
-            )
-            self._later[task] = waiting
-            task.add_done_callback(lambda task: self._later.pop(task, None))
+            if waiting.entity_ids:
+                task = self.hass.async_create_background_task(
+                    self._async_send_later(waiting, delay, member_params, context),
+                    "light_buddy_separate_commands",
+                )
+                self._later[task] = waiting
+                task.add_done_callback(lambda task: self._later.pop(task, None))
         if first_error is not None:
             raise first_error
 
@@ -430,8 +431,9 @@ class RoomCommander:
     ) -> None:
         await asyncio.sleep(delay)
         for entity_ids, call_params in waiting.calls:
-            # Lights turned off since the color was sent, e.g. by a wall
-            # switch, stay off. Lights that did not report on yet still get it.
+            # Lights turned off by others since the color was sent, e.g. by a
+            # wall switch, stay off. Lights that did not report on yet still
+            # get it, as do lights reporting the end of our own turn off.
             if send := [
                 entity_id
                 for entity_id in entity_ids
@@ -440,6 +442,7 @@ class RoomCommander:
                     (state := self.hass.states.get(entity_id)) is not None
                     and state.state != STATE_ON
                     and state.last_changed >= waiting.sent_at
+                    and not self.is_own_context(state.context)
                 )
             ]:
                 await self._async_call(

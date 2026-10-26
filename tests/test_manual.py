@@ -596,3 +596,37 @@ async def test_resume_keeps_running_fades(
     automation._async_clear_pause()
     assert commander.last_sent[lamp]["brightness"].value == 30
     assert commander.last_sent[lamp]["brightness"].transition == 10
+
+
+async def test_repeated_reports_do_not_delay_resume(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light that keeps reporting a paused difference does not delay resuming."""
+    automation, _ = await _setup_room(hass, add_light, setup_integration, "lamp")
+    automation.async_mark_manual({"color_temp"}, command=False)
+    paused_at = automation._paused_at
+    automation._paused_at -= 100
+
+    automation.async_mark_manual({"color_temp"}, command=False)
+    assert automation._paused_at == paused_at - 100
+    automation.async_mark_manual({"color_temp"})
+    assert automation._paused_at >= paused_at
+
+
+async def test_slow_tick_skips_next(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A tick still running makes the next one wait for the one after."""
+    automation, _ = await _setup_room(hass, add_light, setup_integration, "lamp")
+    running = hass.loop.create_future()
+
+    async def slow_tick() -> None:
+        await running
+
+    automation._tick = hass.async_create_task(slow_tick())
+    tasks = set(automation._tasks)
+
+    automation._async_tick_later(dt_util.utcnow())
+    assert automation._tasks == tasks
+    running.set_result(None)
+    await hass.async_block_till_done()

@@ -133,8 +133,9 @@ class RoomAutomation:
         self._get_light = get_light
         self.enabled = enabled
         self._store_enabled = store_enabled
-        # Applying the schedule outside the regular ticks.
+        # Applying the schedule, by ticks and otherwise.
         self._tasks: set[asyncio.Task[None]] = set()
+        self._tick: asyncio.Task[None] | None = None
         self.points: tuple[SchedulePoint, ...] = DEFAULT_SCHEDULE
         self.settings = ScheduleSettings()
         self.target: Target | None = None
@@ -193,6 +194,7 @@ class RoomAutomation:
         if self._unsub_turned_on is not None:
             self._unsub_turned_on()
             self._unsub_turned_on = None
+        self._turned_on.clear()
         self._async_cancel_auto_resume()
 
     @callback
@@ -227,11 +229,12 @@ class RoomAutomation:
         self._async_track(self._async_apply())
 
     @callback
-    def _async_track(self, coro: Coroutine[Any, Any, None]) -> None:
+    def _async_track(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         """Run a task that stopping the automation cancels."""
         task = self.hass.async_create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return task
 
     async def async_set_enabled(self, enabled: bool) -> None:
         """Turn the schedule on or off, and apply it right away when on."""
@@ -243,13 +246,16 @@ class RoomAutomation:
             await self._async_apply()
 
     @callback
-    def async_mark_manual(self, attributes: set[str]) -> None:
+    def async_mark_manual(self, attributes: set[str], *, command: bool = True) -> None:
         """Leave attributes changed by hand alone until the room is off.
 
-        Every manual change starts the automatic resume over.
+        Every command that changes something by hand starts the automatic
+        resume over. Lights reporting a difference that is paused already
+        do not, as they keep reporting it.
         """
-        self._paused_at = self.hass.loop.time()
-        self._async_start_auto_resume()
+        if command or not attributes <= self.paused:
+            self._paused_at = self.hass.loop.time()
+            self._async_start_auto_resume()
         if attributes <= self.paused:
             return
         if not self.paused:
@@ -281,16 +287,17 @@ class RoomAutomation:
 
     @callback
     def _async_auto_resume_later(self, _now: dt.datetime) -> None:
-        self._async_track(self._async_auto_resume())
+        # Cleared here, a timer started before the task runs stays known.
+        self._unsub_auto_resume = None
+        self._async_track(self.async_resume())
 
     @callback
     def _async_tick_later(self, now: dt.datetime) -> None:
-        # Tracked, so stopping the automation cancels a running tick.
-        self._async_track(self._async_tick(now))
-
-    async def _async_auto_resume(self) -> None:
-        self._unsub_auto_resume = None
-        await self.async_resume()
+        # Tracked, so stopping the automation cancels a running tick. With
+        # lights slow to answer, a tick still running skips the next one.
+        if self._tick is not None and not self._tick.done():
+            return
+        self._tick = self._async_track(self._async_tick(now))
 
     @callback
     def _async_clear_pause(self) -> None:
@@ -327,13 +334,11 @@ class RoomAutomation:
 
     @callback
     def _async_apply_turned_on_later(self, _now: dt.datetime) -> None:
-        self._async_track(self._async_apply_turned_on())
-
-    async def _async_apply_turned_on(self) -> None:
+        # Taken here, lights turning on later start a new timer.
         self._unsub_turned_on = None
         members = list(self._turned_on)
         self._turned_on.clear()
-        await self._async_apply(TRANSITION_TURN_ON, members)
+        self._async_track(self._async_apply(TRANSITION_TURN_ON, members))
 
     async def _async_tick(self, _now: dt.datetime) -> None:
         # In case the room turned off while a turn on was still waiting. A

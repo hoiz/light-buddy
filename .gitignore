@@ -3,3 +3,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .coverage
+assets/*.png
+assets/*_black.svg
+assets/*_white.svg

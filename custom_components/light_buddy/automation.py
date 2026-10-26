@@ -41,6 +41,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # Collects lights turning on together, e.g. by a wall switch, into one command.
 TURNED_ON_DEBOUNCE_SECONDS = 0.3
+# A pause this recent is not ended by a room that looks off.
+RECENT_PAUSE_SECONDS = 10
 
 
 # Also the forms of service calls, before Home Assistant converts them.
@@ -105,6 +107,7 @@ class RoomAutomation:
         # the room is off or resumed.
         self.paused: set[str] = set()
         self.paused_since: dt.datetime | None = None
+        self._paused_at = 0.0
         self._unsub_auto_resume: CALLBACK_TYPE | None = None
 
     @property
@@ -184,6 +187,7 @@ class RoomAutomation:
             return
         if not self.paused:
             self.paused_since = dt_util.utcnow()
+        self._paused_at = self.hass.loop.time()
         self.paused |= attributes
         if AUTO_RESUME is not None:
             self._async_cancel_auto_resume()
@@ -245,11 +249,14 @@ class RoomAutomation:
         await self._async_apply(TRANSITION_TURN_ON, members)
 
     async def _async_tick(self, _now: dt.datetime) -> None:
-        # In case the room turned off while a turn on was still waiting.
+        # In case the room turned off while a turn on was still waiting. A
+        # recent pause may belong to a light that is about to report on, and
+        # lights that are unavailable did not turn off.
         if (
             self.paused
+            and self.hass.loop.time() - self._paused_at >= RECENT_PAUSE_SECONDS
             and (light := self.light) is not None
-            and not light.is_on
+            and light.is_on is False
             and not light.turning_on
         ):
             self.async_room_off()

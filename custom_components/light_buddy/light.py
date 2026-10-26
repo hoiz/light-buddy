@@ -65,7 +65,6 @@ from .room import (
     COLOR_GROUP_ATTRS,
     MemberParams,
     RoomCommander,
-    SentValue,
     reachable_kelvin,
     turn_off_params,
 )
@@ -202,7 +201,9 @@ class RoomLight(LightEntity):
             automation is not None
             and commander is not None
             and was_on
-            and not self._attr_is_on
+            # Lights that became unavailable, e.g. during a restart, did not
+            # turn off.
+            and self._attr_is_on is False
             # A turn on right after the turn off may already be on its way.
             and not commander.turning_on
         ):
@@ -252,12 +253,9 @@ class RoomLight(LightEntity):
         attributes = state.attributes
         changed = set()
 
-        def _settled(value: SentValue) -> bool:
-            return now - value.sent_at >= value.transition + TRANSITION_GRACE_SECONDS
-
         if (
             (sent_kelvin := sent.get(ATTR_COLOR_TEMP_KELVIN)) is not None
-            and _settled(sent_kelvin)
+            and sent_kelvin.settled(now, TRANSITION_GRACE_SECONDS)
             and ColorMode.COLOR_TEMP
             in (attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ())
         ):
@@ -271,7 +269,7 @@ class RoomLight(LightEntity):
                 changed.add(PAUSE_COLOR_TEMP)
         if (
             (sent_brightness := sent.get(ATTR_BRIGHTNESS)) is not None
-            and _settled(sent_brightness)
+            and sent_brightness.settled(now, TRANSITION_GRACE_SECONDS)
             and (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None
             and abs(brightness - sent_brightness.value) >= MANUAL_BRIGHTNESS_THRESHOLD
         ):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.light import (
@@ -59,6 +60,9 @@ type ManagedEntity = RoomLight | RoomEntity | LightOffsetEntity
 
 # Registry changes that can move a light between rooms, change whether it
 # gets offset settings, or rename them.
+# The longest transition Home Assistant accepts.
+MAX_TRANSITION_SECONDS = 6553
+
 REFRESH_FIELDS = frozenset(
     {"area_id", "capabilities", "device_id", "disabled_by", "name", "original_name"}
 )
@@ -135,10 +139,7 @@ class RoomManager:
         service_data = event.data[ATTR_SERVICE_DATA]
         transition = _seconds(service_data.get(ATTR_TRANSITION))
         attributes: set[str] = set()
-        if service == SERVICE_TURN_OFF:
-            if not transition:
-                return
-        else:
+        if service != SERVICE_TURN_OFF:
             attributes = manual_attributes(service_data)
             if not attributes and not (service == SERVICE_TOGGLE and transition):
                 return
@@ -155,12 +156,18 @@ class RoomManager:
             is_on = (
                 state := self.hass.states.get(entity_id)
             ) is not None and state.state == STATE_ON
-            # A toggle turns lights that are on off.
-            if service == SERVICE_TURN_OFF or (service == SERVICE_TOGGLE and is_on):
-                if light is not None and is_on and transition:
-                    light.async_member_turning_off(entity_id, transition)
-            elif (
-                attributes
+            # Lights fade out when turned off, some even without a transition.
+            # A toggle may turn a light off, too, also one about to turn on.
+            if light is not None and (
+                service == SERVICE_TURN_OFF
+                or (service == SERVICE_TOGGLE and transition)
+            ):
+                light.async_member_turning_off(entity_id, transition)
+            # A toggle only turns lights that are off on, with its values.
+            if (
+                service != SERVICE_TURN_OFF
+                and not (service == SERVICE_TOGGLE and is_on)
+                and attributes
                 and (automation := self._automations.get(area_id)) is not None
             ):
                 automation.async_mark_manual(attributes)
@@ -493,9 +500,12 @@ def _entity_event_filter(event_data: er.EventEntityRegistryUpdatedData) -> bool:
 def _seconds(value: Any) -> float:
     """Return a transition from service data, which is not validated yet."""
     try:
-        return max(float(value), 0)
+        seconds = float(value)
     except TypeError, ValueError:
         return 0
+    if not math.isfinite(seconds):
+        return 0
+    return min(max(seconds, 0), MAX_TRANSITION_SECONDS)
 
 
 @callback

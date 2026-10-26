@@ -45,6 +45,8 @@ COLOR_ATTRS = frozenset(
     {ATTR_HS_COLOR, ATTR_RGB_COLOR, ATTR_RGBW_COLOR, ATTR_RGBWW_COLOR, ATTR_XY_COLOR}
 )
 COLOR_GROUP_ATTRS = COLOR_ATTRS | {ATTR_COLOR_TEMP_KELVIN, ATTR_WHITE}
+# Descriptors that replace a color temperature on a light.
+NOT_COLOR_TEMP_ATTRS = COLOR_GROUP_ATTRS - {ATTR_COLOR_TEMP_KELVIN}
 
 # Enough to recognize the state changes our recent commands cause.
 OWN_CONTEXTS = 50
@@ -62,6 +64,10 @@ class SentValue:
     value: float
     sent_at: float
     transition: float = 0
+
+    def settled(self, now: float, grace: float) -> bool:
+        """Return True once the light should show the value."""
+        return now - self.sent_at >= self.transition + grace
 
 
 def reachable_kelvin(kelvin: float, attributes: Mapping[str, Any]) -> int:
@@ -173,17 +179,22 @@ class RoomCommander:
         now = self.hass.loop.time()
         for entity_id in entity_ids:
             state = self.hass.states.get(entity_id)
-            if state is None or state.state != STATE_ON:
+            # Lights showing a color are not controlled by the schedule.
+            if (
+                state is None
+                or state.state != STATE_ON
+                or state.attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP
+            ):
                 self.last_sent.pop(entity_id, None)
                 continue
+            sent = self.last_sent.get(entity_id, {})
             shown = {}
-            if (
-                state.attributes.get(ATTR_COLOR_MODE) == ColorMode.COLOR_TEMP
-                and (kelvin := state.attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None
-            ):
-                shown[ATTR_COLOR_TEMP_KELVIN] = SentValue(kelvin, now)
-            if (brightness := state.attributes.get(ATTR_BRIGHTNESS)) is not None:
-                shown[ATTR_BRIGHTNESS] = SentValue(brightness, now)
+            for attr in TRACKED_ATTRS:
+                if (value := sent.get(attr)) is not None and not value.settled(now, 0):
+                    # Still fading towards it, keep the fade.
+                    shown[attr] = value
+                elif (current := state.attributes.get(attr)) is not None:
+                    shown[attr] = SentValue(current, now)
             self.last_sent[entity_id] = shown
 
     @property
@@ -329,7 +340,7 @@ class RoomCommander:
         transition = call_params.get(ATTR_TRANSITION, 0)
         for entity_id in entity_ids:
             sent = self.last_sent.setdefault(entity_id, {})
-            if not COLOR_ATTRS.isdisjoint(call_params):
+            if not NOT_COLOR_TEMP_ATTRS.isdisjoint(call_params):
                 # Showing a color now, no color temperature to compare.
                 sent.pop(ATTR_COLOR_TEMP_KELVIN, None)
             for attr in TRACKED_ATTRS:

@@ -463,6 +463,11 @@ async def test_pause_ends_on_tick_if_room_stayed_off(
     await hass.async_block_till_done()
     automation.async_mark_manual({"brightness"})
 
+    # A fresh pause may belong to a light about to report on.
+    await _tick(hass)
+    assert automation.paused == {"brightness"}
+
+    automation._paused_at -= 60
     await _tick(hass)
     assert automation.paused == set()
 
@@ -526,3 +531,68 @@ async def test_older_transition_still_counts(
     hass.states.async_set(lamp, STATE_ON, _on(3400, 100), context=Context())
     await hass.async_block_till_done()
     assert automation.paused == set()
+
+
+async def test_unavailable_room_keeps_pause(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Lights that are unavailable, e.g. during a restart, keep the pause."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    automation.async_mark_manual({"brightness"})
+    automation._paused_at -= 60
+    hass.states.async_set(lamp, "unavailable", WIDE_LIGHT)
+    await hass.async_block_till_done()
+
+    await _tick(hass)
+    assert automation.paused == {"brightness"}
+
+
+@pytest.mark.parametrize("transition", ["inf", "nan", None, "x"])
+async def test_invalid_transitions(
+    hass: HomeAssistant, add_light, setup_integration, transition
+) -> None:
+    """Odd transitions do not switch off noticing changes for good."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+    await automation.async_resume()
+
+    await hass.services.async_call(
+        "light", "turn_off", {"entity_id": lamp, "transition": transition}
+    )
+    await hass.async_block_till_done()
+    _age_last_sent(hass, lamp)
+    room = _room(hass)
+    room._member_turning_off_until[lamp] -= 10
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 30), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == {"brightness"}
+
+
+async def test_white_replaces_color_temp(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """After sending white, there is no color temperature to compare."""
+    _, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    commander = _room(hass)._commander
+    await commander.async_send_now({lamp: {"color_temp_kelvin": 4000}})
+    await commander.async_send_now({lamp: {"white": 200}})
+    assert "color_temp_kelvin" not in commander.last_sent[lamp]
+
+
+async def test_resume_keeps_running_fades(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Resuming during a fade keeps comparing with where it is heading."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    commander = _room(hass)._commander
+    await commander.async_send_now({lamp: {"brightness": 30, "transition": 10}})
+    automation.async_mark_manual({"brightness"})
+
+    automation._async_clear_pause()
+    assert commander.last_sent[lamp]["brightness"].value == 30
+    assert commander.last_sent[lamp]["brightness"].transition == 10

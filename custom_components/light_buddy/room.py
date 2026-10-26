@@ -122,6 +122,9 @@ class RoomCommander:
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
         self._own_context_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
+        # When each light last got a turn on, and its params, to tell later
+        # changes made elsewhere.
+        self.last_sent: dict[str, tuple[float, dict[str, Any]]] = {}
         self._next_allowed = 0.0
         self._pending: tuple[str, MemberParams, Context | None] | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
@@ -249,6 +252,10 @@ class RoomCommander:
                 _LOGGER.warning("Sending %s to %s failed: %s", service, entity_ids, err)
                 first_error = first_error or err
                 continue
+            if service == SERVICE_TURN_ON:
+                sent_at = self.hass.loop.time()
+                for entity_id in entity_ids:
+                    self.last_sent[entity_id] = (sent_at, call_params)
             if ATTR_COLOR_TEMP_KELVIN in call_params:
                 for entity_id in entity_ids:
                     self.sent_color_temps[entity_id] = (

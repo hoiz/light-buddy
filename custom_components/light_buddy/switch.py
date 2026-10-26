@@ -34,6 +34,15 @@ class ScheduleSwitch(RoomEntity, SwitchEntity):
 
     @property
     @override
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return what the schedule leaves alone after manual changes."""
+        return {
+            "paused": sorted(self._automation.paused),
+            "paused_since": self._automation.paused_since,
+        }
+
+    @property
+    @override
     def is_on(self) -> bool:
         """Return True if the room follows its schedule."""
         return self._automation.enabled

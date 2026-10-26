@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -12,7 +12,15 @@ from homeassistant.components.light import (
     color_temp_supported,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import (
+    ATTR_DOMAIN,
+    ATTR_SERVICE,
+    ATTR_SERVICE_DATA,
+    EVENT_CALL_SERVICE,
+    SERVICE_TOGGLE,
+    SERVICE_TURN_ON,
+    Platform,
+)
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import (
     area_registry as ar,
@@ -21,8 +29,12 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.target import (
+    TargetSelection,
+    async_extract_referenced_entity_ids,
+)
 
-from .automation import RoomAutomation
+from .automation import RoomAutomation, manual_attributes
 from .const import (
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
@@ -84,6 +96,13 @@ class RoomManager:
         """Create the entities and listen for registry changes."""
         self.entry.async_on_unload(self._debouncer.async_shutdown)
         self.entry.async_on_unload(self._async_stop_automations)
+        self.entry.async_on_unload(
+            self.hass.bus.async_listen(
+                EVENT_CALL_SERVICE,
+                self._async_light_service_called,
+                event_filter=_light_service_filter,
+            )
+        )
         for event_type, event_filter in (
             (er.EVENT_ENTITY_REGISTRY_UPDATED, _entity_event_filter),
             (dr.EVENT_DEVICE_REGISTRY_UPDATED, _device_event_filter),
@@ -99,6 +118,32 @@ class RoomManager:
     @callback
     def _async_schedule_refresh(self, _event: Event[Any]) -> None:
         self._debouncer.async_schedule_call()
+
+    @callback
+    def _async_light_service_called(self, event: Event[Mapping[str, Any]]) -> None:
+        """Pause what others set on purpose on the lights of a room.
+
+        Covers lights controlled directly, by automations, and by scenes,
+        which apply their states through light.turn_on as well.
+        """
+        service_data = event.data[ATTR_SERVICE_DATA]
+        if not (attributes := manual_attributes(service_data)):
+            return
+        # Groups are not expanded: a call to a room light is handled by it.
+        selected = async_extract_referenced_entity_ids(
+            self.hass, TargetSelection(service_data), expand_group=False
+        )
+        area_ids = {
+            area_id
+            for entity_id in selected.referenced | selected.indirectly_referenced
+            if (area_id := self._light_rooms.get(entity_id)) is not None
+        }
+        for area_id in area_ids:
+            light = self._lights.get(area_id)
+            if light is not None and light.is_own_context(event.context):
+                continue
+            if (automation := self._automations.get(area_id)) is not None:
+                automation.async_mark_manual(attributes)
 
     @callback
     def async_refresh(self) -> None:
@@ -386,10 +431,11 @@ class RoomManager:
 def _room_entity_classes() -> tuple[type[RoomEntity], ...]:
     """Return the entities each room gets next to its room light."""
     # Imported here, as the platforms import this module.
+    from .button import ResumeScheduleButton
     from .sensor import TargetColorTempSensor
     from .switch import ScheduleSwitch
 
-    return (ScheduleSwitch, TargetColorTempSensor)
+    return (ScheduleSwitch, ResumeScheduleButton, TargetColorTempSensor)
 
 
 def offset_entity_classes() -> tuple[type[LightOffsetEntity], ...]:
@@ -421,6 +467,15 @@ def _entity_event_filter(event_data: er.EventEntityRegistryUpdatedData) -> bool:
         return True
     return "old_entity_id" in event_data or not REFRESH_FIELDS.isdisjoint(
         event_data["changes"]
+    )
+
+
+@callback
+def _light_service_filter(event_data: Mapping[str, Any]) -> bool:
+    """Only calls that turn lights on can set something on purpose."""
+    return event_data[ATTR_DOMAIN] == LIGHT_DOMAIN and event_data[ATTR_SERVICE] in (
+        SERVICE_TURN_ON,
+        SERVICE_TOGGLE,
     )
 
 

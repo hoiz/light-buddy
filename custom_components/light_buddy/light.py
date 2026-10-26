@@ -34,7 +34,14 @@ from homeassistant.const import (
     STATE_UNKNOWN,
     Platform,
 )
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, State, callback
+from homeassistant.core import (
+    CALLBACK_TYPE,
+    Context,
+    Event,
+    HomeAssistant,
+    State,
+    callback,
+)
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import (
     EventStateChangedData,
@@ -42,8 +49,16 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.util.color import value_to_brightness
 
-from .automation import RoomAutomation
-from .const import BRIGHTNESS_THRESHOLD, COMMAND_INTERVAL_SECONDS
+from .automation import RoomAutomation, manual_attributes
+from .const import (
+    BRIGHTNESS_THRESHOLD,
+    COMMAND_INTERVAL_SECONDS,
+    MANUAL_BRIGHTNESS_THRESHOLD,
+    MANUAL_COLOR_TEMP_THRESHOLD_KELVIN,
+    PAUSE_BRIGHTNESS,
+    PAUSE_COLOR_TEMP,
+    TRANSITION_GRACE_SECONDS,
+)
 from .manager import LightBuddyConfigEntry
 from .offset import ColorTempOffset, clamp, same_color_temp
 from .room import COLOR_GROUP_ATTRS, MemberParams, RoomCommander, turn_off_params
@@ -171,9 +186,21 @@ class RoomLight(LightEntity):
         new_state = event.data["new_state"]
         if old_state is None or new_state is None:
             return
+        automation = self._automation
+        if automation is not None and not self._attr_is_on:
+            automation.async_room_off()
         now = self.hass.loop.time()
         if old_state.state == STATE_ON and new_state.state != STATE_ON:
             self._turned_off_at[new_state.entity_id] = now
+        elif (
+            automation is not None
+            and self._commander is not None
+            and old_state.state == STATE_ON
+            and new_state.state == STATE_ON
+            and not self._commander.is_own_context(new_state.context)
+            and (attributes := self._changed_elsewhere(new_state, now))
+        ):
+            automation.async_mark_manual(attributes)
         elif (
             self._automation is not None
             and self._commander is not None
@@ -188,6 +215,45 @@ class RoomLight(LightEntity):
             >= LIGHT_OFF_GRACE
         ):
             self._automation.async_light_turned_on(new_state.entity_id)
+
+    def _changed_elsewhere(self, state: State, now: float) -> set[str]:
+        """Return what changed on a light compared with what we last sent.
+
+        For changes outside Home Assistant, e.g. by a remote bound to the
+        light. Values reported during our own transition do not count.
+        """
+        assert self._commander is not None
+        if (last_sent := self._commander.last_sent.get(state.entity_id)) is None:
+            return set()
+        sent_at, params = last_sent
+        if now - sent_at < params.get(ATTR_TRANSITION, 0) + TRANSITION_GRACE_SECONDS:
+            return set()
+        attributes = state.attributes
+        changed = set()
+        if (sent_kelvin := params.get(ATTR_COLOR_TEMP_KELVIN)) is not None:
+            kelvin = attributes.get(ATTR_COLOR_TEMP_KELVIN)
+            # What the light can show of what was sent.
+            sent_kelvin = clamp(
+                sent_kelvin,
+                attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
+                attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
+            )
+            if (
+                attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP
+                or kelvin is None
+                or abs(kelvin - sent_kelvin) >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN
+            ):
+                changed.add(PAUSE_COLOR_TEMP)
+        if (sent_brightness := params.get(ATTR_BRIGHTNESS)) is not None and (
+            (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None
+            and abs(brightness - sent_brightness) >= MANUAL_BRIGHTNESS_THRESHOLD
+        ):
+            changed.add(PAUSE_BRIGHTNESS)
+        return changed
+
+    def is_own_context(self, context: Context) -> bool:
+        """Return True if a context belongs to a command of this room."""
+        return self._commander is not None and self._commander.is_own_context(context)
 
     def _turning_off(self, now: float) -> bool:
         """Return True while the room light is turning the room off."""
@@ -217,6 +283,8 @@ class RoomLight(LightEntity):
             members = off
         overrides = None
         automation = self._automation
+        if automation is not None and (attributes := manual_attributes(kwargs)):
+            automation.async_mark_manual(attributes)
         if (
             automation is not None
             and automation.active
@@ -230,7 +298,7 @@ class RoomLight(LightEntity):
                 for entity_id in off
                 if (
                     params := _target_params(
-                        states[entity_id], automation.target, kwargs
+                        states[entity_id], automation.target, kwargs, automation.paused
                     )
                 )
             }
@@ -256,13 +324,15 @@ class RoomLight(LightEntity):
         *,
         members: list[str] | None = None,
         threshold: float = 0,
+        paused: frozenset[str] = frozenset(),
     ) -> None:
         """Bring lights that are on and show a color temperature to the target.
 
         Lights showing a color were set by someone and are left alone. A light
         is compared to what it can show, with its offset and limited to its
         range, so lights that cannot reach the target are not sent it again
-        and again. Nothing is sent while the room is turning off.
+        and again. Paused attributes are left alone, and nothing is sent while
+        the room is turning off.
         """
         assert self._commander is not None
         if self._turning_off(self.hass.loop.time()):
@@ -277,7 +347,10 @@ class RoomLight(LightEntity):
             if attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP:
                 continue
             params: dict[str, Any] = {}
-            if (current := attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None:
+            if (
+                PAUSE_COLOR_TEMP not in paused
+                and (current := attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None
+            ):
                 offset = self._offsets.get(entity_id)
                 reachable = clamp(
                     offset.apply(target.kelvin) if offset else target.kelvin,
@@ -286,7 +359,7 @@ class RoomLight(LightEntity):
                 )
                 if abs(current - reachable) >= threshold:
                     params[ATTR_COLOR_TEMP_KELVIN] = target.kelvin
-            if target.brightness is not None:
+            if target.brightness is not None and PAUSE_BRIGHTNESS not in paused:
                 brightness = _brightness_255(target.brightness)
                 current = attributes.get(ATTR_BRIGHTNESS)
                 if current is None or abs(current - brightness) >= BRIGHTNESS_THRESHOLD:
@@ -458,18 +531,25 @@ class RoomLight(LightEntity):
 
 
 def _target_params(
-    state: State | None, target: Target, call_params: Mapping[str, Any]
+    state: State | None,
+    target: Target,
+    call_params: Mapping[str, Any],
+    paused: set[str],
 ) -> dict[str, Any]:
     """Return what a light turning on needs to show the target.
 
-    Brightness from the call wins over the target's brightness.
+    Brightness from the call wins over the target's brightness, and paused
+    attributes are left out.
     """
     modes = (state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) if state else None) or ()
     params: dict[str, Any] = {}
-    if state is None or ColorMode.COLOR_TEMP in modes:
+    if PAUSE_COLOR_TEMP not in paused and (
+        state is None or ColorMode.COLOR_TEMP in modes
+    ):
         params[ATTR_COLOR_TEMP_KELVIN] = target.kelvin
     if (
         target.brightness is not None
+        and PAUSE_BRIGHTNESS not in paused
         and ATTR_BRIGHTNESS not in call_params
         and (state is None or brightness_supported(modes))
     ):

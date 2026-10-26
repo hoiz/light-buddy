@@ -3,23 +3,28 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 import datetime as dt
 import hashlib
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.light import ATTR_BRIGHTNESS
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.sun import get_astral_event_date
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    AUTO_RESUME,
     COLOR_TEMP_THRESHOLD_KELVIN,
+    PAUSE_BRIGHTNESS,
+    PAUSE_COLOR_TEMP,
     SCHEDULE_INTERVAL,
     TRANSITION_SCHEDULE,
     TRANSITION_TURN_ON,
 )
+from .room import COLOR_GROUP_ATTRS
 from .schedule import DEFAULT_SCHEDULE, SchedulePoint, Target, target_at
 
 if TYPE_CHECKING:
@@ -29,6 +34,19 @@ _LOGGER = logging.getLogger(__name__)
 
 # Collects lights turning on together, e.g. by a wall switch, into one command.
 TURNED_ON_DEBOUNCE_SECONDS = 0.3
+
+
+def manual_attributes(params: Mapping[str, Any]) -> set[str]:
+    """Return what a turn on with these params sets on purpose.
+
+    Colors count as color temperature, since they take its place.
+    """
+    attributes = set()
+    if ATTR_BRIGHTNESS in params:
+        attributes.add(PAUSE_BRIGHTNESS)
+    if not COLOR_GROUP_ATTRS.isdisjoint(params):
+        attributes.add(PAUSE_COLOR_TEMP)
+    return attributes
 
 
 class RoomAutomation:
@@ -63,6 +81,11 @@ class RoomAutomation:
         self._unsubs: list[CALLBACK_TYPE] = []
         self._turned_on: set[str] = set()
         self._unsub_turned_on: CALLBACK_TYPE | None = None
+        # Attributes changed by hand, which the schedule leaves alone until
+        # the room is off or resumed.
+        self.paused: set[str] = set()
+        self.paused_since: dt.datetime | None = None
+        self._unsub_auto_resume: CALLBACK_TYPE | None = None
 
     @property
     def light(self) -> RoomLight | None:
@@ -111,6 +134,7 @@ class RoomAutomation:
         if self._unsub_turned_on is not None:
             self._unsub_turned_on()
             self._unsub_turned_on = None
+        self._async_cancel_auto_resume()
 
     @callback
     def async_add_listener(self, update: CALLBACK_TYPE) -> CALLBACK_TYPE:
@@ -118,13 +142,64 @@ class RoomAutomation:
         self._listeners.append(update)
         return lambda: self._listeners.remove(update)
 
+    @callback
+    def async_set_points(self, points: Sequence[SchedulePoint]) -> None:
+        """Follow another schedule from now on."""
+        self.points = tuple(points)
+        self._async_update_target()
+
     async def async_set_enabled(self, enabled: bool) -> None:
         """Turn the schedule on or off, and apply it right away when on."""
         self.enabled = enabled
         self._store_enabled(self.area_id, enabled)
         self._async_notify()
         if enabled:
+            self._async_update_target()
             await self._async_apply()
+
+    @callback
+    def async_mark_manual(self, attributes: set[str]) -> None:
+        """Leave attributes changed by hand alone until the room is off."""
+        if attributes <= self.paused:
+            return
+        if not self.paused:
+            self.paused_since = dt_util.utcnow()
+        self.paused |= attributes
+        if AUTO_RESUME is not None:
+            self._async_cancel_auto_resume()
+            self._unsub_auto_resume = async_call_later(
+                self.hass, AUTO_RESUME, self._async_auto_resume
+            )
+        self._async_notify()
+
+    async def async_resume(self) -> None:
+        """Follow the schedule again in full, and apply it right away."""
+        self._async_clear_pause()
+        self._async_update_target()
+        await self._async_apply()
+
+    @callback
+    def async_room_off(self) -> None:
+        """Forget manual changes once all lights of the room are off."""
+        self._async_clear_pause()
+
+    async def _async_auto_resume(self, _now: dt.datetime) -> None:
+        self._unsub_auto_resume = None
+        await self.async_resume()
+
+    @callback
+    def _async_clear_pause(self) -> None:
+        self._async_cancel_auto_resume()
+        if self.paused:
+            self.paused.clear()
+            self.paused_since = None
+            self._async_notify()
+
+    @callback
+    def _async_cancel_auto_resume(self) -> None:
+        if self._unsub_auto_resume is not None:
+            self._unsub_auto_resume()
+            self._unsub_auto_resume = None
 
     @callback
     def async_light_turned_on(self, entity_id: str) -> None:
@@ -162,6 +237,7 @@ class RoomAutomation:
                     transition,
                     members=members,
                     threshold=COLOR_TEMP_THRESHOLD_KELVIN,
+                    paused=frozenset(self.paused),
                 )
             except Exception:
                 # Failed calls are logged per light, the next tick tries again.

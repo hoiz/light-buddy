@@ -79,11 +79,33 @@ Pro Raum gibt es:
 
 So verhält sich der Zeitplan:
 
-- **Einschalten über das Raum-Licht:** Ausgeschaltete Lampen gehen direkt mit dem Zielwert an, ohne vorher die alte Farbe zu zeigen. Mit einer eigenen Farbe (z. B. aus einer Szene) bleibt die Farbe unverändert. Eine eigene Farbtemperatur setzt der Zeitplan derzeit bei der nächsten Anpassung zurück; das Erkennen manueller Änderungen folgt.
+- **Einschalten über das Raum-Licht:** Ausgeschaltete Lampen gehen direkt mit dem Zielwert an, ohne vorher die alte Farbe zu zeigen. Mit einer eigenen Farbe oder Farbtemperatur (z. B. aus einer Szene) bleibt sie unverändert, siehe „Manuelle Änderungen“.
 - **Einschalten an der Lampe selbst oder per Wandschalter:** Die Lampe bekommt den Zielwert innerhalb von etwa einer Sekunde.
 - **Laufende Anpassung:** Jede Minute bekommen eingeschaltete Lampen den Zielwert mit einem kurzen Übergang von 2 s. Gesendet wird nur, wenn die Lampe mindestens 50 K davon entfernt ist. Die Räume sind dabei über die Minute verteilt.
 - **Farbige Lampen:** Lampen, die gerade eine Farbe zeigen, lässt der Zeitplan ganz in Ruhe, auch bei der Helligkeit.
 - **Offsets:** Farbtemperatur-Offsets gelten auch für den Zeitplan.
+
+## Manuelle Änderungen
+
+Stellst du von Hand etwas ein, lässt der Zeitplan genau das im Raum in Ruhe:
+
+- **Dimmen** pausiert nur die Helligkeit. Die Farbtemperatur folgt weiter dem Zeitplan.
+- **Farbtemperatur oder Farbe einstellen** pausiert die Farbtemperatur.
+
+Als manuell zählt:
+
+- eine Einstellung über das Raum-Licht (Kachel, Regler, Szene);
+- ein Befehl an eine einzelne Lampe, z. B. über ihre eigene Kachel, eine Automation oder eine Szene;
+- eine Änderung außerhalb von Home Assistant, z. B. über eine direkt gekoppelte Fernbedienung. Sie zählt ab 150 K bzw. 5 % Abweichung von dem, was Light Buddy zuletzt gesendet hat.
+
+Einschalten ohne Werte ist keine manuelle Änderung.
+
+Die Pause endet:
+
+- wenn alle Lampen im Raum aus sind; beim nächsten Einschalten gilt wieder der Zeitplan;
+- mit **Zeitplan fortsetzen** (`button.resume_schedule_<bereich>`); der Zeitplan wird sofort wieder angewendet.
+
+Was gerade pausiert ist, zeigt der Schalter **Zeitplan** in den Attributen `paused` und `paused_since`.
 
 ## Verhalten
 

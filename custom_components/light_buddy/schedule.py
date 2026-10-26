@@ -65,11 +65,15 @@ def target_at(
     Works across midnight and across days with different points. Brightness
     is only interpolated between points that have one. None without points.
     """
-    occurrences = _occurrences(points, now, sun_time)
-    kelvin = _interpolate(
-        [(when, MIRED / point.kelvin) for when, point in occurrences], now
-    )
-    if kelvin is None:
+    # Most schedules have points every day, so a day around now is enough.
+    for search_days in (1, SEARCH_DAYS):
+        occurrences = _occurrences(points, now, sun_time, search_days)
+        kelvin = _interpolate(
+            [(when, MIRED / point.kelvin) for when, point in occurrences], now
+        )
+        if kelvin is not None:
+            break
+    else:
         return None
     brightness = _interpolate(
         [
@@ -85,11 +89,17 @@ def target_at(
 
 
 def _occurrences(
-    points: Sequence[SchedulePoint], now: dt.datetime, sun_time: SunTime | None
+    points: Sequence[SchedulePoint],
+    now: dt.datetime,
+    sun_time: SunTime | None,
+    search_days: int,
 ) -> list[tuple[dt.datetime, SchedulePoint]]:
-    """Return when the points happen in the days around now, sorted."""
+    """Return when the points happen in the days around now, sorted, in UTC.
+
+    In UTC, time differences stay right on days the clocks change.
+    """
     occurrences = []
-    for day_offset in range(-SEARCH_DAYS, SEARCH_DAYS + 1):
+    for day_offset in range(-search_days, search_days + 1):
         day = now.date() + dt.timedelta(days=day_offset)
         for point in points:
             if point.weekdays is not None and day.weekday() not in point.weekdays:
@@ -105,7 +115,7 @@ def _occurrences(
                 )
             else:
                 continue
-            occurrences.append((when, point))
+            occurrences.append((when.astimezone(dt.UTC), point))
     occurrences.sort(key=lambda occurrence: occurrence[0])
     return occurrences
 
@@ -113,7 +123,11 @@ def _occurrences(
 def _interpolate(
     values: Sequence[tuple[dt.datetime, float]], now: dt.datetime
 ) -> float | None:
-    """Return the linear interpolation at now between the surrounding values."""
+    """Return the linear interpolation at now between the surrounding values.
+
+    None unless there are values before and after now.
+    """
+    now = now.astimezone(dt.UTC)
     previous = next_ = None
     for when, value in values:
         if when <= now:
@@ -122,8 +136,7 @@ def _interpolate(
             next_ = (when, value)
             break
     if previous is None or next_ is None:
-        # Values on one side only, e.g. sun points during polar night.
-        return None if previous is None and next_ is None else (previous or next_)[1]
+        return None
     (start, start_value), (end, end_value) = previous, next_
     progress = (now - start) / (end - start)
     return start_value + progress * (end_value - start_value)

@@ -91,3 +91,16 @@ def test_no_points() -> None:
 def test_default_schedule_in_range(hour: int) -> None:
     """The default schedule stays between its warmest and coldest point."""
     assert 2200 <= target_at(DEFAULT_SCHEDULE, _at(hour)).kelvin <= 5000
+
+
+def test_daylight_saving_change() -> None:
+    """Progress follows real time on the night the clocks go back."""
+    points = [SchedulePoint(2000, dt.time(1, 0)), SchedulePoint(3000, dt.time(4, 0))]
+    # 25 October 2026: 01:00 to 04:00 are four real hours in Berlin.
+    day = dt.date(2026, 10, 25)
+    halfway = dt.datetime(2026, 10, 25, 1, 0, tzinfo=TZ).astimezone(dt.UTC) + (
+        dt.timedelta(hours=2)
+    )
+    # 500 and 333.3 mired, halfway is 416.7 mired.
+    assert target_at(points, halfway.astimezone(TZ)) == Target(2400)
+    assert target_at(points, _at(4, 0, day)) == Target(3000)

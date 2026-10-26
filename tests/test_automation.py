@@ -59,10 +59,31 @@ async def test_tick_updates_lights_that_are_on(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
     """The tick brings lights showing a color temperature to the target."""
-    plain = add_light("plain", area="Wohnzimmer", attributes=WHITE_LIGHT)
-    cold = add_light("cold", area="Wohnzimmer", attributes=WHITE_LIGHT)
-    near = add_light("near", area="Wohnzimmer", attributes=WHITE_LIGHT)
-    color = add_light("color", area="Wohnzimmer")
+    # Already on, so they are not seen as turned on elsewhere.
+    plain = add_light(
+        "plain", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 3000)
+    )
+    cold = add_light(
+        "cold", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 2700)
+    )
+    # Within the threshold of 50 K.
+    add_light(
+        "near", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 4980)
+    )
+    # Someone chose a color, which the schedule leaves alone.
+    add_light(
+        "color",
+        area="Wohnzimmer",
+        state=STATE_ON,
+        attributes={**COLOR_LIGHT, "color_mode": ColorMode.XY, "brightness": 100},
+    )
+    # Can only reach 4000 K, which it already shows.
+    add_light(
+        "limited",
+        area="Wohnzimmer",
+        state=STATE_ON,
+        attributes=_on(COLOR_LIGHT, 4000),
+    )
     add_light("off", area="Wohnzimmer")
     registry = er.async_get(hass)
     await setup_integration(
@@ -73,15 +94,6 @@ async def test_tick_updates_lights_that_are_on(
         },
         schedule=True,
     )
-    hass.states.async_set(plain, STATE_ON, _on(WHITE_LIGHT, 3000))
-    hass.states.async_set(cold, STATE_ON, _on(WHITE_LIGHT, 2700))
-    # Within the threshold of 50 K.
-    hass.states.async_set(near, STATE_ON, _on(WHITE_LIGHT, 4980))
-    # Someone chose a color, which the schedule leaves alone.
-    hass.states.async_set(
-        color, STATE_ON, {**COLOR_LIGHT, "color_mode": ColorMode.XY, "brightness": 100}
-    )
-    await hass.async_block_till_done()
     calls = async_mock_service(hass, "light", "turn_on")
 
     await _tick(hass)
@@ -144,6 +156,8 @@ async def test_light_turned_on_elsewhere(
     calls = async_mock_service(hass, "light", "turn_on")
 
     hass.states.async_set(lamp, STATE_ON, _on(COLOR_LIGHT, 2700))
+    # Lights turning on together are collected for a moment.
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
     await hass.async_block_till_done()
     assert [call.data for call in calls] == [
         {"entity_id": [lamp], "color_temp_kelvin": 5000, "transition": 1}
@@ -214,3 +228,58 @@ async def test_target_follows_time(
     freezer.move_to("2026-10-26 23:00:00-07:00")
     await _tick(hass)
     assert hass.states.get(TARGET).state == "2200"
+
+
+async def test_lights_turned_on_together_get_one_command(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Lights turned on by a wall switch together get a single command."""
+    lamps = [add_light(name, area="Wohnzimmer") for name in ("a", "b", "c")]
+    await setup_integration(schedule=True)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    for lamp in lamps:
+        hass.states.async_set(lamp, STATE_ON, _on(COLOR_LIGHT, 2700))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert [sorted(call.data["entity_id"]) for call in calls] == [sorted(lamps)]
+
+
+async def test_light_with_color_turned_on_elsewhere(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light turned on with a color, e.g. by a scene, keeps it."""
+    lamp = add_light("lamp", area="Wohnzimmer")
+    await setup_integration(schedule=True)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    hass.states.async_set(
+        lamp, STATE_ON, {**COLOR_LIGHT, "color_mode": ColorMode.XY, "brightness": 100}
+    )
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert calls == []
+
+
+async def test_no_target_while_turning_off(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Lights reporting on right after turning off are not turned on again."""
+    lamp = add_light(
+        "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(COLOR_LIGHT, 3000)
+    )
+    await setup_integration(schedule=True)
+    on_calls = async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+
+    # Turned off without the room light, then a short report of on.
+    hass.states.async_set(lamp, STATE_OFF, COLOR_LIGHT)
+    hass.states.async_set(lamp, STATE_ON, _on(COLOR_LIGHT, 3000))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert on_calls == []
+
+    # The room light turns off with a transition, and the tick runs meanwhile.
+    await hass.data[DATA_COMPONENT].get_entity(ROOM).async_turn_off(transition=5)
+    await _tick(hass)
+    assert on_calls == []

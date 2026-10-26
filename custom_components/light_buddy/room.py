@@ -28,7 +28,6 @@ from homeassistant.const import (
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
-    STATE_ON,
 )
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
@@ -59,8 +58,7 @@ def async_split_turn_on(
     Lights that receive identical params share one service call. Colors only go
     to lights that support color, because Home Assistant would otherwise turn a
     color into some color temperature on white lights. Lights with an offset
-    get their own color temperature. Lights that are on and get no params are
-    left out, as the command would not change them.
+    get their own color temperature.
     """
     calls: list[tuple[list[str], dict[str, Any]]] = []
     for entity_id, requested in member_params.items():
@@ -84,8 +82,6 @@ def async_split_turn_on(
                 state.attributes.get(ATTR_EFFECT_LIST) or ()
             ):
                 del params[ATTR_EFFECT]
-            if not params and state.state == STATE_ON:
-                continue
         for entity_ids, call_params in calls:
             if call_params == params:
                 entity_ids.append(entity_id)
@@ -129,6 +125,11 @@ class RoomCommander:
         self._next_allowed = 0.0
         self._pending: tuple[str, MemberParams, Context | None] | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
+
+    @property
+    def turning_off(self) -> bool:
+        """Return True if a turn off waits to be sent."""
+        return self._pending is not None and self._pending[0] == SERVICE_TURN_OFF
 
     def is_own_context(self, context: Context) -> bool:
         """Return True if a state change was caused by one of our commands."""

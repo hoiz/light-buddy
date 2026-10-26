@@ -44,7 +44,7 @@ from homeassistant.helpers.event import (
 from .automation import RoomAutomation
 from .const import BRIGHTNESS_THRESHOLD, COMMAND_INTERVAL_SECONDS
 from .manager import LightBuddyConfigEntry
-from .offset import ColorTempOffset, same_color_temp
+from .offset import ColorTempOffset, clamp, same_color_temp
 from .room import COLOR_GROUP_ATTRS, MemberParams, RoomCommander, turn_off_params
 from .schedule import Target
 
@@ -54,6 +54,8 @@ PARALLEL_UPDATES = 0
 
 # Some lights report on for a moment after a turn off, longer with transition.
 TURNING_OFF_GRACE = 3
+# A light reporting on this soon after it went off is not treated as turned on.
+LIGHT_OFF_GRACE = 5
 
 FORWARDED_FEATURES = (
     LightEntityFeature.EFFECT | LightEntityFeature.FLASH | LightEntityFeature.TRANSITION
@@ -101,6 +103,7 @@ class RoomLight(LightEntity):
         self._automation = automation
         # Lights turning on before this loop time may still be turning off.
         self._turning_off_until = 0.0
+        self._turned_off_at: dict[str, float] = {}
         self._unsub_members: CALLBACK_TYPE | None = None
         self._commander: RoomCommander | None = None
         self._attr_color_mode = ColorMode.ONOFF
@@ -165,21 +168,30 @@ class RoomLight(LightEntity):
 
         old_state = event.data["old_state"]
         new_state = event.data["new_state"]
-        if (
+        if old_state is None or new_state is None:
+            return
+        now = self.hass.loop.time()
+        if old_state.state == STATE_ON and new_state.state != STATE_ON:
+            self._turned_off_at[new_state.entity_id] = now
+        elif (
             self._automation is not None
             and self._commander is not None
-            and old_state is not None
-            and new_state is not None
             and old_state.state in (STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN)
             and new_state.state == STATE_ON
             # Our own commands already turned it on with the target.
             and not self._commander.is_own_context(new_state.context)
-            # Lights may report on for a moment while turning off.
-            and self.hass.loop.time() >= self._turning_off_until
+            # Lights may report on for a moment while turning off, also when
+            # turned off without the room light.
+            and not self._turning_off(now)
+            and now - self._turned_off_at.get(new_state.entity_id, -LIGHT_OFF_GRACE)
+            >= LIGHT_OFF_GRACE
         ):
-            self.hass.async_create_task(
-                self._automation.async_light_turned_on(new_state.entity_id)
-            )
+            self._automation.async_light_turned_on(new_state.entity_id)
+
+    def _turning_off(self, now: float) -> bool:
+        """Return True while the room light is turning the room off."""
+        assert self._commander is not None
+        return now < self._turning_off_until or self._commander.turning_off
 
     @override
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -189,6 +201,16 @@ class RoomLight(LightEntity):
         right away, so they do not show their old color first.
         """
         assert self._commander is not None
+        members = self._members
+        if not kwargs and not self._turning_off(self.hass.loop.time()):
+            # A bare turn on would not change lights that are on. Right after
+            # turning off, they may still report on, though.
+            members = [
+                entity_id
+                for entity_id in members
+                if (state := self.hass.states.get(entity_id)) is None
+                or state.state != STATE_ON
+            ]
         overrides = None
         automation = self._automation
         if (
@@ -201,14 +223,15 @@ class RoomLight(LightEntity):
         ):
             overrides = {
                 entity_id: params
-                for entity_id in self._members
+                for entity_id in members
                 if (state := self.hass.states.get(entity_id)) is None
                 or state.state != STATE_ON
                 if (params := _target_params(state, automation.target, kwargs))
             }
-        await self._commander.async_turn_on(
-            self._members, kwargs, self._context, overrides
-        )
+        if members:
+            await self._commander.async_turn_on(
+                members, kwargs, self._context, overrides
+            )
 
     @override
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -227,40 +250,45 @@ class RoomLight(LightEntity):
         *,
         members: list[str] | None = None,
         threshold: float = 0,
-        force: bool = False,
     ) -> None:
-        """Bring lights that are on to the target.
+        """Bring lights that are on and show a color temperature to the target.
 
-        Only lights showing a color temperature are changed, unless forced for
-        a light that was just turned on. Values closer to the target than the
-        threshold are not sent again.
+        Lights showing a color were set by someone and are left alone. A light
+        is compared to what it can show, with its offset and limited to its
+        range, so lights that cannot reach the target are not sent it again
+        and again. Nothing is sent while the room is turning off.
         """
         assert self._commander is not None
+        if self._turning_off(self.hass.loop.time()):
+            return
         member_params: MemberParams = {}
         for entity_id in members or self._members:
             state = self.hass.states.get(entity_id)
             if state is None or state.state != STATE_ON:
                 continue
-            modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ()
+            attributes = state.attributes
+            modes = attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ()
             params: dict[str, Any] = {}
-            if ColorMode.COLOR_TEMP in modes and (
-                force or state.attributes.get(ATTR_COLOR_MODE) == ColorMode.COLOR_TEMP
+            if (
+                attributes.get(ATTR_COLOR_MODE) == ColorMode.COLOR_TEMP
+                and (current := attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None
             ):
-                shown = self._requested_color_temp(state)
-                if force or shown is None or abs(shown - target.kelvin) >= threshold:
+                offset = self._offsets.get(entity_id)
+                reachable = clamp(
+                    offset.apply(target.kelvin) if offset else target.kelvin,
+                    attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
+                    attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
+                )
+                if abs(current - reachable) >= threshold:
                     params[ATTR_COLOR_TEMP_KELVIN] = target.kelvin
             if target.brightness is not None and brightness_supported(modes):
                 brightness = _brightness_255(target.brightness)
-                current = state.attributes.get(ATTR_BRIGHTNESS)
-                if (
-                    force
-                    or current is None
-                    or abs(current - brightness) >= BRIGHTNESS_THRESHOLD
-                ):
+                current = attributes.get(ATTR_BRIGHTNESS)
+                if current is None or abs(current - brightness) >= BRIGHTNESS_THRESHOLD:
                     params[ATTR_BRIGHTNESS] = brightness
             if not params:
                 continue
-            if transition and state.attributes.get(ATTR_SUPPORTED_FEATURES, 0) & (
+            if transition and attributes.get(ATTR_SUPPORTED_FEATURES, 0) & (
                 LightEntityFeature.TRANSITION
             ):
                 params[ATTR_TRANSITION] = transition

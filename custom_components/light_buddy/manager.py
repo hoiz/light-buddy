@@ -143,7 +143,10 @@ class RoomManager:
         which apply their states through light.turn_on as well.
         """
         service_data = event.data[ATTR_SERVICE_DATA]
-        if not sets_color(service_data):
+        color = sets_color(service_data)
+        if not color and not any(
+            automation.disco.settling for automation in self._automations.values()
+        ):
             return
         # Groups are not expanded: a call to a room light is handled by it.
         selected = async_extract_referenced_entity_ids(
@@ -155,13 +158,18 @@ class RoomManager:
             light = self._lights.get(area_id)
             if light is not None and light.is_own_context(event.context):
                 continue
+            if (automation := self._automations.get(area_id)) is not None:
+                # Newer than commands disco would send again.
+                automation.disco.async_drop_from_repeats(entity_id)
+            if not color:
+                continue
             # A toggle only turns lights that are off on, with its color.
             if event.data[ATTR_SERVICE] == SERVICE_TOGGLE and (
                 (state := self.hass.states.get(entity_id)) is not None
                 and state.state == STATE_ON
             ):
                 continue
-            if (automation := self._automations.get(area_id)) is not None:
+            if automation is not None:
                 automation.async_mark_manual()
 
     @callback

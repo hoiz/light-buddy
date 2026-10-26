@@ -129,7 +129,7 @@ async def test_start_in_room_that_is_off(
 
 
 async def test_steps(hass: HomeAssistant, add_light, setup_integration) -> None:
-    """Colors move on with a short fade, lights turned off stay off."""
+    """Colors move on with a long fade, lights turned off stay off."""
     a = add_light("a", area="Wohnzimmer", state=STATE_ON)
     b = add_light("b", area="Wohnzimmer", state=STATE_ON)
     c = add_light("c", area="Wohnzimmer", state=STATE_ON)
@@ -138,13 +138,14 @@ async def test_steps(hass: HomeAssistant, add_light, setup_integration) -> None:
     calls = async_mock_service(hass, "light", "turn_on")
     hass.states.async_set(b, STATE_OFF, COLOR_LIGHT)
 
-    await _later(hass, 3)
+    await _later(hass, 9)
     assert calls == []
-    await _later(hass, 4)
+    await _later(hass, 11)
 
+    # Fading almost until the next step.
     assert [call.data for call in calls] == [
-        {"entity_id": [a], "hs_color": RAINBOW[1], "transition": 1},
-        {"entity_id": [c], "hs_color": RAINBOW[3], "transition": 1},
+        {"entity_id": [a], "hs_color": RAINBOW[1], "transition": 9},
+        {"entity_id": [c], "hs_color": RAINBOW[3], "transition": 9},
     ]
 
 
@@ -292,7 +293,8 @@ async def test_lights_turned_off_end_disco(
 ) -> None:
     """All lights turned off elsewhere end disco, after the start."""
     lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON)
-    await setup_integration()
+    # Steps within the start grace.
+    await setup_integration({"settings": {"disco_interval": 3}})
     await _switch(hass, "turn_on")
     calls = async_mock_service(hass, "light", "turn_on")
 
@@ -302,12 +304,12 @@ async def test_lights_turned_off_end_disco(
     assert hass.states.get(DISCO).state == STATE_ON
 
     # Lights may be slow to report on, so the first step only skips.
-    freezer.tick(4)
+    freezer.tick(3)
     await _later(hass, 0)
     assert hass.states.get(DISCO).state == STATE_ON
 
     # The next step finds the room still off.
-    freezer.tick(4)
+    freezer.tick(3)
     await _later(hass, 0)
     assert hass.states.get(DISCO).state == STATE_OFF
     assert calls == []
@@ -365,16 +367,16 @@ async def test_settings_apply_live(
         entry,
         options={
             **entry.options,
-            "settings": {"disco_interval": 10, "disco_palette": "fire"},
+            "settings": {"disco_interval": 20, "disco_palette": "fire"},
         },
     )
     await hass.async_block_till_done()
-    await _later(hass, 5)
+    await _later(hass, 15)
     assert calls == []
-    await _later(hass, 11)
+    await _later(hass, 21)
 
     assert [call.data for call in calls] == [
-        {"entity_id": [lamp], "hs_color": PALETTES["fire"][1], "transition": 1}
+        {"entity_id": [lamp], "hs_color": PALETTES["fire"][1], "transition": 19}
     ]
 
 
@@ -430,31 +432,30 @@ async def test_stop_cancels_commands_being_sent(
     assert off_calls == []
 
 
-async def test_stop_waits_for_the_fade(
+async def test_stop_repeats_after_the_fade(
     hass: HomeAssistant,
     add_light,
     setup_integration,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """IKEA lights ignore commands while fading, so the restore waits."""
+    """The restore goes out at once, and again for lights that were fading."""
     lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
     await setup_integration()
     await _switch(hass, "turn_on")
-    freezer.tick(4)
-    await _later(hass, 0)
+    await _step_and_fade(hass, freezer)
     calls = async_mock_service(hass, "light", "turn_on")
+    restore = {"entity_id": [lamp], "brightness": 100, "hs_color": (0, 50)}
 
-    stop = hass.async_create_task(_call_switch(hass, "turn_off"))
-    for _ in range(5):
-        await asyncio.sleep(0)
-    assert calls == []
+    await _switch(hass, "turn_off")
+    assert [call.data for call in calls] == [restore]
 
+    # The fade of the step ends 9 s after it, the restore follows.
+    freezer.tick(8)
+    await _later(hass, 0)
+    assert len(calls) == 1
     freezer.tick(2)
     await _later(hass, 0)
-    await stop
-    assert [call.data for call in calls] == [
-        {"entity_id": [lamp], "brightness": 100, "hs_color": (0, 50)}
-    ]
+    assert [call.data for call in calls] == [restore, restore]
 
 
 async def test_pause_survives_the_start(
@@ -518,7 +519,7 @@ async def test_lights_switched_during_disco_keep_it(
 
 async def _step_and_fade(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
     """Let a step run, whose fade is still going on."""
-    freezer.tick(4)
+    freezer.tick(10)
     await _later(hass, 0)
 
 
@@ -527,13 +528,13 @@ async def _settle(hass: HomeAssistant) -> None:
         await asyncio.sleep(0)
 
 
-async def test_room_off_drops_waiting_restore(
+async def test_room_off_drops_restore_to_repeat(
     hass: HomeAssistant,
     add_light,
     setup_integration,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Turning the room off while a restore waits for the fade keeps it off."""
+    """Turning the room off after disco keeps it off, also after the fade."""
     lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
     await setup_integration()
     await _switch(hass, "turn_on")
@@ -541,26 +542,208 @@ async def test_room_off_drops_waiting_restore(
     on_calls = async_mock_service(hass, "light", "turn_on")
     off_calls = async_mock_service(hass, "light", "turn_off")
 
-    stop = hass.async_create_task(_call_switch(hass, "turn_off"))
-    await _settle(hass)
-    room_off = hass.async_create_task(_room(hass).async_turn_off())
-    await _settle(hass)
-    freezer.tick(2)
+    await _switch(hass, "turn_off")
+    await _room(hass).async_turn_off()
+    await hass.async_block_till_done()
+    freezer.tick(10)
     await _later(hass, 0)
-    await stop
-    await room_off
 
-    assert on_calls == []
-    assert [call.data for call in off_calls] == [{"entity_id": [lamp]}]
+    # The restore went out once, the turn off once more after the fade.
+    assert len(on_calls) == 1
+    assert [call.data for call in off_calls] == [
+        {"entity_id": [lamp]},
+        {"entity_id": [lamp]},
+    ]
 
 
-async def test_turned_on_again_before_restore(
+async def test_room_off_is_repeated_even_if_reported_off(
     hass: HomeAssistant,
     add_light,
     setup_integration,
     freezer: FrozenDateTimeFactory,
 ) -> None:
-    """Off and on again quickly keeps disco, and what it restores later."""
+    """Lights may report off although they ignored it while fading."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    off_calls = async_mock_service(hass, "light", "turn_off")
+
+    await _room(hass).async_turn_off()
+    # Reported off, as an answer to our command.
+    hass.states.async_set(lamp, STATE_OFF, COLOR_LIGHT, context=off_calls[0].context)
+    await hass.async_block_till_done()
+    freezer.tick(10)
+    await _later(hass, 0)
+
+    assert [call.data for call in off_calls] == [
+        {"entity_id": [lamp]},
+        {"entity_id": [lamp]},
+    ]
+
+
+async def test_switched_by_others_cancels_repeat(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A light switched by others after disco is not switched back."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _switch(hass, "turn_off")
+    assert len(calls) == 1
+
+    # E.g. a remote bound to the light.
+    hass.states.async_set(lamp, STATE_OFF, COLOR_LIGHT)
+    await hass.async_block_till_done()
+    freezer.tick(10)
+    await _later(hass, 0)
+
+    assert len(calls) == 1
+
+
+async def test_stop_drops_older_repeats(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A brightness waiting to be sent again does not follow the restore."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    await _room(hass).async_turn_on(brightness=50)
+    await _switch(hass, "turn_off")
+    freezer.tick(10)
+    await _later(hass, 0)
+
+    restore = {"entity_id": [lamp], "brightness": 100, "hs_color": (0, 50)}
+    assert [call.data for call in calls] == [
+        {"entity_id": [lamp], "brightness": 50},
+        restore,
+        restore,
+    ]
+
+
+async def test_turned_on_while_restoring(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Turned on again while the restore goes out, it is not repeated."""
+    add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    restores: list[dict] = []
+    release = asyncio.Event()
+
+    async def _slow(call: ServiceCall) -> None:
+        if "brightness" in call.data:
+            restores.append(dict(call.data))
+            await release.wait()
+
+    hass.services.async_register("light", "turn_on", _slow)
+    stop = hass.async_create_task(_call_switch(hass, "turn_off"))
+    await _settle(hass)
+    assert len(restores) == 1
+    start = hass.async_create_task(_call_switch(hass, "turn_on"))
+    await _settle(hass)
+    release.set()
+    await asyncio.gather(stop, start)
+    freezer.tick(10)
+    await _later(hass, 0)
+
+    assert hass.states.get(DISCO).state == STATE_ON
+    assert len(restores) == 1
+
+
+async def test_brightness_during_disco_is_repeated(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Brightness during a fade goes out once more after it."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON)
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    await _room(hass).async_turn_on(brightness=50)
+    await hass.async_block_till_done()
+    freezer.tick(9)
+    await _later(hass, 0)
+
+    assert [call.data for call in calls] == [
+        {"entity_id": [lamp], "brightness": 50},
+        {"entity_id": [lamp], "brightness": 50},
+    ]
+
+
+async def test_disco_colors_after_restore_do_not_pause(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Lights still showing disco colors until the repeat are no manual change."""
+    lamp = add_light(
+        "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_ct(COLOR_LIGHT, 3000)
+    )
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _hs(RAINBOW[0]))
+    await _step_and_fade(hass, freezer)
+    async_mock_service(hass, "light", "turn_on")
+
+    await _switch(hass, "turn_off")
+    # The light ignored the restore, and reports its disco color later.
+    freezer.tick(4)
+    hass.states.async_set(lamp, STATE_ON, _hs(RAINBOW[1]))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(SCHEDULE).state == STATE_ON
+
+
+async def test_unload_while_settling(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Unloaded before the repeat, nothing is sent again."""
+    add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    entry = await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _switch(hass, "turn_off")
+    assert len(calls) == 1
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    freezer.tick(10)
+    await _later(hass, 0)
+
+    assert len(calls) == 1
+
+
+async def test_turned_on_again_before_repeat(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Off and on again during the fade keeps what disco restores later."""
     lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
     white = add_light(
         "white", area="Wohnzimmer", state=STATE_ON, attributes=_ct(WHITE_LIGHT, 2700)
@@ -572,28 +755,24 @@ async def test_turned_on_again_before_restore(
     await _step_and_fade(hass, freezer)
     calls = async_mock_service(hass, "light", "turn_on")
 
-    stop = hass.async_create_task(_call_switch(hass, "turn_off"))
-    await _settle(hass)
-    start = hass.async_create_task(_call_switch(hass, "turn_on"))
-    await _settle(hass)
-    freezer.tick(2)
-    await _later(hass, 0)
-    await stop
-    await start
-
+    await _switch(hass, "turn_off")
+    # The lights still show disco.
+    await _switch(hass, "turn_on")
     assert hass.states.get(DISCO).state == STATE_ON
-    # No restore went out, only disco colors.
-    assert all("hs_color" in call.data for call in calls)
-    assert all(call.data["entity_id"] == [lamp] for call in calls)
-
     calls.clear()
-    # A step, then its fade has ended.
+
+    # The restore is not repeated after the fade.
     freezer.tick(10)
     await _later(hass, 0)
-    freezer.tick(2)
+    assert all("hs_color" in call.data for call in calls)
+
+    calls.clear()
+    freezer.tick(20)
     await _later(hass, 0)
     await _switch(hass, "turn_off")
-    assert sorted((call.data for call in calls), key=_entity)[-2:] == [
+    # What the lights showed before the first start comes back.
+    restores = [call.data for call in calls if "brightness" in call.data]
+    assert sorted(restores, key=_entity) == [
         {"entity_id": [lamp], "brightness": 100, "hs_color": (0, 50)},
         {"entity_id": [white], "brightness": 100, "color_temp_kelvin": 2700},
     ]
@@ -727,3 +906,81 @@ async def test_lights_in_unknown_state(
     await _switch(hass, "turn_off")
 
     assert [call.data for call in off_calls] == [{"entity_id": [unknown]}]
+
+
+async def test_late_reports_keep_the_repeat(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A late report of the restore itself does not drop it for others."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    white = add_light(
+        "white", area="Wohnzimmer", state=STATE_ON, attributes=_ct(WHITE_LIGHT, 2700)
+    )
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    hass.states.async_set(white, STATE_OFF, WHITE_LIGHT)
+    await _step_and_fade(hass, freezer)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _switch(hass, "turn_off")
+
+    # The white light reports on late, without our context.
+    freezer.tick(6)
+    hass.states.async_set(white, STATE_ON, _ct(WHITE_LIGHT, 2700))
+    await hass.async_block_till_done()
+    calls.clear()
+    freezer.tick(4)
+    await _later(hass, 0)
+
+    assert sorted(call.data["entity_id"][0] for call in calls) == [lamp, white]
+
+
+async def test_one_light_changed_keeps_the_repeat_for_others(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Only the light changed by others is left out of the repeat."""
+    a = add_light("a", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    b = add_light("b", area="Wohnzimmer", state=STATE_ON, attributes=_hs((120, 50)))
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _switch(hass, "turn_off")
+    calls.clear()
+
+    # A remote turns one light off, an automation dims the other.
+    hass.states.async_set(a, STATE_OFF, COLOR_LIGHT)
+    await hass.async_block_till_done()
+    freezer.tick(10)
+    await _later(hass, 0)
+    assert [call.data["entity_id"] for call in calls] == [[b]]
+
+
+async def test_outside_brightness_drops_the_light(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A brightness set on a light by others is not undone by the repeat."""
+    a = add_light("a", area="Wohnzimmer", state=STATE_ON, attributes=_hs((0, 50)))
+    b = add_light("b", area="Wohnzimmer", state=STATE_ON, attributes=_hs((120, 50)))
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    await _step_and_fade(hass, freezer)
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _switch(hass, "turn_off")
+
+    await hass.services.async_call(
+        "light", "turn_on", {"entity_id": a, "brightness": 30}, blocking=True
+    )
+    calls.clear()
+    freezer.tick(10)
+    await _later(hass, 0)
+
+    assert [call.data["entity_id"] for call in calls] == [[b]]

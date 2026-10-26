@@ -234,6 +234,10 @@ class RoomLight(LightEntity):
             automation.disco.async_light_switched(
                 entity_id, new_state.state == STATE_ON
             )
+            # Switched by others after disco: commands sent again would undo it.
+            automation.disco.async_drop_from_repeats(
+                entity_id, new_state.state == STATE_ON
+            )
         if old_state.state == STATE_ON and new_state.state != STATE_ON:
             self._turned_off_at[entity_id] = now
             self._manual_color.pop(entity_id, None)
@@ -246,6 +250,7 @@ class RoomLight(LightEntity):
             and new_state.state == STATE_ON
             # Disco sets the colors, and leaves the schedule as it was.
             and not automation.disco.running
+            and not automation.disco.settling
             and not commander.is_own_context(new_state.context)
             # Lights report their values while the room fades out, too.
             and not self._turning_off(now)
@@ -347,6 +352,10 @@ class RoomLight(LightEntity):
             members = off
         overrides = None
         automation = self._automation
+        # Lights fading into a color of disco may ignore it until the fade ends.
+        repeat = automation is not None and (
+            automation.disco.running or automation.disco.settling
+        )
         if automation is not None and automation.disco.running:
             if sets_color(kwargs):
                 # A color of its own ends disco, the lights keep it.
@@ -355,6 +364,9 @@ class RoomLight(LightEntity):
                 # White lights stay off during disco.
                 colored = set(self.color_members)
                 members = [entity_id for entity_id in members if entity_id in colored]
+        if automation is not None and repeat:
+            # This command is newer than any waiting to be sent again.
+            automation.disco.async_cancel_repeats()
         if automation is not None and sets_color(kwargs):
             automation.async_mark_manual()
         if (
@@ -377,21 +389,41 @@ class RoomLight(LightEntity):
                 )
             }
         if members:
-            await self._commander.async_turn_on(
-                members, kwargs, self._context, overrides
-            )
+            commander, context = self._commander, self._context
+            await commander.async_turn_on(members, kwargs, context, overrides)
+            if automation is not None and repeat:
+                automation.disco.async_after_fade(
+                    lambda entity_ids: commander.async_turn_on(
+                        entity_ids, kwargs, context, overrides
+                    ),
+                    dict.fromkeys(members, True),
+                )
 
     @override
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off all lights of the room. Disco ends, the lights stay off."""
+        """Turn off all lights of the room. Disco ends, the lights stay off.
+
+        Lights fading into a color of disco get it once more after the fade.
+        """
         assert self._commander is not None
-        if self._automation is not None:
-            await self._automation.disco.async_stop(restore=False)
+        commander = self._commander
+        disco = self._automation.disco if self._automation is not None else None
+        repeat = disco is not None and (disco.running or disco.settling)
+        if disco is not None:
+            await disco.async_stop(restore=False)
+            disco.async_cancel_repeats()
         params = turn_off_params(kwargs)
         self._turning_off_until = (
             self.hass.loop.time() + params.get(ATTR_TRANSITION, 0) + TURNING_OFF_GRACE
         )
-        await self._commander.async_turn_off(self._members, params, self._context)
+        await commander.async_turn_off(self._members, params, self._context)
+        if disco is not None and repeat:
+            disco.async_after_fade(
+                lambda entity_ids: commander.async_turn_off_now(
+                    entity_ids, even_if_off=True
+                ),
+                dict.fromkeys(self._members, False),
+            )
 
     async def async_apply_target(
         self,
@@ -541,11 +573,14 @@ class RoomLight(LightEntity):
         self,
         snapshot: Mapping[str, dict[str, Any] | None],
         color_temp: float | None,
+        *,
+        repeat: bool = False,
     ) -> None:
         """Bring the lights back to a snapshot.
 
         With a color temperature, lights that showed one get it instead, so
-        lights following the schedule get its current target.
+        lights following the schedule get its current target. Repeated, also
+        lights reported off are turned off.
         """
         assert self._commander is not None
         on: MemberParams = {}
@@ -557,12 +592,18 @@ class RoomLight(LightEntity):
                 off.append(entity_id)
             else:
                 on[entity_id] = restored_params(params, color_temp)
+        # One failing call must not keep the others from turning off. When
+        # cancelled for a newer command, nothing more is sent.
+        error: Exception | None = None
         try:
             if on:
                 await self._commander.async_send_now(on)
-        finally:
-            if off:
-                await self._commander.async_turn_off_now(off)
+        except Exception as err:
+            error = err
+        if off:
+            await self._commander.async_turn_off_now(off, even_if_off=repeat)
+        if error is not None:
+            raise error
 
     @callback
     def _async_update_state(self) -> None:

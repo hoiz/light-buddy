@@ -49,7 +49,7 @@
           "transition": "For the schedule's updates every minute. Keep it short: IKEA lights ignore other commands, even turning off, during a transition.",
           "auto_resume_minutes": "After a manual change, the room's Schedule switch turns on again by itself after this time. 0 waits until the room is off.",
           "separate_commands": "Some lights, IKEA ones in particular, do not change brightness and color temperature together cleanly, e.g. when turning on a room with a brightness. They then get the color temperature first and the brightness half a second later.",
-          "disco_interval": "Seconds until the next color. Each color change sends one command per color, so very short times load the Zigbee network.",
+          "disco_interval": "Seconds until the next color. Each color fades in over almost all of this time, so the lights flow from color to color. Each change sends one command per color, so very short times load the Zigbee network.",
           "disco_palette": "The colors the disco mode cycles through. Each light shows a different one."
         },
         "description": "![Curve]({chart})\n\nThe schedule follows the sun: warmest from late evening until sunrise (not before 06:00, not after 07:30), coldest at solar noon. The chart shows the saved values for today, and thin lines for the longest and shortest day."

@@ -12,7 +12,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.light_buddy.disco import PALETTES, step_colors
 from homeassistant.components.light import DATA_COMPONENT, ColorMode
-from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
@@ -707,3 +707,23 @@ async def test_unload_while_start_waits(
     await _later(hass, 20)
 
     assert calls == []
+
+
+async def test_lights_in_unknown_state(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Colored lights not reported yet turn off again, white ones are left."""
+    add_light("lamp", area="Wohnzimmer", state=STATE_ON)
+    unknown = add_light("unknown", area="Wohnzimmer", state=STATE_UNKNOWN)
+    add_light(
+        "unknown_white", area="Wohnzimmer", state=STATE_UNKNOWN, attributes=WHITE_LIGHT
+    )
+    await setup_integration()
+    await _switch(hass, "turn_on")
+    hass.states.async_set(unknown, STATE_ON, _hs(RAINBOW[1]))
+    await hass.async_block_till_done()
+    off_calls = async_mock_service(hass, "light", "turn_off")
+
+    await _switch(hass, "turn_off")
+
+    assert [call.data for call in off_calls] == [{"entity_id": [unknown]}]

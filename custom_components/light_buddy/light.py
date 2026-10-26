@@ -454,14 +454,22 @@ class RoomLight(LightEntity):
 
         None for lights that are off. Color temperatures are without offset,
         which sending applies again. Lights that are unavailable are left out.
+
+        Colored lights in an unknown state count as off: disco turns them on,
+        and they are usually off, e.g. after a restart before they reported.
         """
         snapshot: dict[str, dict[str, Any] | None] = {}
         for entity_id in self._members:
             state = self.hass.states.get(entity_id)
-            if state is None or state.state not in (STATE_ON, STATE_OFF):
+            if state is None:
                 continue
-            if state.state == STATE_OFF:
+            if state.state == STATE_OFF or (
+                state.state == STATE_UNKNOWN
+                and color_supported(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES))
+            ):
                 snapshot[entity_id] = None
+                continue
+            if state.state != STATE_ON:
                 continue
             attributes = state.attributes
             params: dict[str, Any] = {}

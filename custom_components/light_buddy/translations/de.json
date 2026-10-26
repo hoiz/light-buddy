@@ -15,12 +15,12 @@
       "init": {
         "title": "Light-Buddy-Optionen",
         "menu_options": {
-          "rooms": "Räume",
+          "rooms": "Ausschlüsse",
           "settings": "Einstellungen"
         }
       },
       "rooms": {
-        "title": "Räume",
+        "title": "Ausschlüsse",
         "data": {
           "excluded_areas": "Ausgeschlossene Bereiche",
           "excluded_lights": "Ausgeschlossene Lampen"

@@ -15,12 +15,12 @@
       "init": {
         "title": "Light Buddy options",
         "menu_options": {
-          "rooms": "Rooms",
+          "rooms": "Exclusions",
           "settings": "Settings"
         }
       },
       "rooms": {
-        "title": "Rooms",
+        "title": "Exclusions",
         "data": {
           "excluded_areas": "Excluded areas",
           "excluded_lights": "Excluded lights"

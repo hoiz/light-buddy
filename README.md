@@ -34,7 +34,7 @@ When you move a light, or add or rename an area, Light Buddy follows without a r
 
 ## Options
 
-Settings → Devices & services → Light Buddy → **Configure** → **Rooms**:
+Settings → Devices & services → Light Buddy → **Configure** → **Exclusions**:
 
 - **Excluded areas**: these areas get no room light.
 - **Excluded lights**: these lights belong to no room, e.g. template lights that control other lights themselves.

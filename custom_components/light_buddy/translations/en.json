@@ -14,13 +14,6 @@
     "step": {
       "init": {
         "title": "Light Buddy options",
-        "menu_options": {
-          "rooms": "Rooms",
-          "offsets": "Color temperature offsets"
-        }
-      },
-      "rooms": {
-        "title": "Rooms",
         "data": {
           "excluded_areas": "Excluded areas",
           "excluded_lights": "Excluded lights"
@@ -29,26 +22,7 @@
           "excluded_areas": "No room light is created for these areas.",
           "excluded_lights": "These lights are never part of a room light, e.g. template lights that control other lights."
         }
-      },
-      "offsets": {
-        "title": "Color temperature offsets",
-        "description": "Shift the color temperature of a light that looks colder or warmer than the others. The offset applies when the color temperature is set through a room light.\n\nCurrent offsets:\n{offsets}",
-        "data": {
-          "light": "Light"
-        }
-      },
-      "offset": {
-        "title": "Offset for {light}",
-        "description": "In Kelvin, a negative value makes the light warmer, e.g. -300. In mired, a positive value makes it warmer, e.g. +20; a mired step looks the same across the whole range. 0 removes the offset.",
-        "data": {
-          "unit": "Unit",
-          "value": "Offset"
-        }
       }
-    },
-    "error": {
-      "offset_too_large": "The offset is too large: at most {max_kelvin} K or {max_mired} mired.",
-      "invalid_light": "Choose a single light. Light Buddy room lights and light groups can't have an offset."
     }
   },
   "entity": {
@@ -56,13 +30,13 @@
       "room": {
         "name": "All lights in {area}"
       }
-    }
-  },
-  "selector": {
-    "unit": {
-      "options": {
-        "K": "Kelvin",
-        "mired": "Mired"
+    },
+    "number": {
+      "color_temp_offset": {
+        "name": "Color temperature offset"
+      },
+      "color_temp_offset_light": {
+        "name": "{light} color temperature offset"
       }
     }
   }

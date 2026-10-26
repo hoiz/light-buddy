@@ -1,6 +1,6 @@
 """Tests for the registry event filters."""
 
-from custom_components.light_buddy.light import _entity_event_filter
+from custom_components.light_buddy.manager import _entity_event_filter
 
 
 def test_entity_event_filter() -> None:

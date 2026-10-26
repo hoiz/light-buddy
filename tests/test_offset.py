@@ -1,27 +1,24 @@
 """Tests for the color temperature offset math."""
 
-import pytest
-
 from custom_components.light_buddy.offset import (
-    ColorTempOffset,
+    apply_offset,
     clamp,
+    remove_offset,
     same_color_temp,
 )
 
 
-def test_kelvin_offset() -> None:
-    """A Kelvin offset is added when sending and removed when reading."""
-    offset = ColorTempOffset(-300, "K")
-    assert offset.apply(3000) == 2700
-    assert offset.remove(2700) == 3000
+def test_offset() -> None:
+    """An offset is added when sending and removed when reading."""
+    assert apply_offset(3000, -300) == 2700
+    assert remove_offset(2700, -300) == 3000
 
 
-def test_mired_offset() -> None:
-    """A mired offset shifts in mired, so positive values are warmer."""
-    offset = ColorTempOffset(20, "mired")
-    # 4000 K is 250 mired, plus 20 is 270 mired.
-    assert offset.apply(4000) == pytest.approx(1_000_000 / 270)
-    assert offset.remove(offset.apply(4000)) == pytest.approx(4000)
+def test_offsets_stay_in_range() -> None:
+    """Offsets never produce zero, negative or absurd temperatures."""
+    assert apply_offset(2700, -2000) == 1000
+    assert remove_offset(9500, -1500) == 10000
+    assert clamp(-300, None, None) == 1000
 
 
 def test_clamp() -> None:
@@ -35,11 +32,3 @@ def test_same_color_temp() -> None:
     """Rounding to whole mireds does not count as a change."""
     assert same_color_temp(2700, 2703)
     assert not same_color_temp(2700, 2800)
-
-
-def test_offsets_stay_in_range() -> None:
-    """Large offsets never produce zero, negative or absurd temperatures."""
-    assert ColorTempOffset(100, "mired").remove(6500) == 10000
-    assert ColorTempOffset(-100, "mired").apply(10000) == 10000
-    assert ColorTempOffset(-2000, "K").apply(2700) == 1000
-    assert clamp(-300, None, None) == 1000

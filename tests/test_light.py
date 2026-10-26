@@ -310,8 +310,8 @@ async def test_offset_applies_and_is_hidden(
     await setup_integration(
         {
             "offsets": {
-                _registry_id(hass, cold): {"value": -300, "unit": "K"},
-                _registry_id(hass, clamped): {"value": -500, "unit": "K"},
+                _registry_id(hass, cold): -300,
+                _registry_id(hass, clamped): -500,
             }
         }
     )
@@ -353,9 +353,7 @@ async def test_offset_survives_entity_id_change(
 ) -> None:
     """Offsets follow a light when its entity id changes."""
     lamp = add_light("lamp", area="Wohnzimmer")
-    await setup_integration(
-        {"offsets": {_registry_id(hass, lamp): {"value": -300, "unit": "K"}}}
-    )
+    await setup_integration({"offsets": {_registry_id(hass, lamp): -300}})
     er.async_get(hass).async_update_entity(lamp, new_entity_id="light.stehlampe")
     hass.states.async_set("light.stehlampe", STATE_OFF, COLOR_LIGHT)
     await _settle(hass)
@@ -373,9 +371,7 @@ async def test_failing_call_does_not_block_others(
     """When one call fails, the other lights still get their command."""
     first = add_light("a_first", area="Wohnzimmer")
     second = add_light("b_second", area="Wohnzimmer")
-    await setup_integration(
-        {"offsets": {_registry_id(hass, first): {"value": -300, "unit": "K"}}}
-    )
+    await setup_integration({"offsets": {_registry_id(hass, first): -300}})
     calls = []
 
     async def turn_on(call) -> None:
@@ -401,8 +397,8 @@ async def test_shown_color_temp_follows_other_changes(
     await setup_integration(
         {
             "offsets": {
-                _registry_id(hass, cold): {"value": 300, "unit": "K"},
-                _registry_id(hass, warm): {"value": -300, "unit": "K"},
+                _registry_id(hass, cold): 300,
+                _registry_id(hass, warm): -300,
             }
         }
     )

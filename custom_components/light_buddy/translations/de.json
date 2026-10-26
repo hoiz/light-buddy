@@ -14,13 +14,6 @@
     "step": {
       "init": {
         "title": "Light-Buddy-Optionen",
-        "menu_options": {
-          "rooms": "Räume",
-          "offsets": "Farbtemperatur-Offsets"
-        }
-      },
-      "rooms": {
-        "title": "Räume",
         "data": {
           "excluded_areas": "Ausgeschlossene Bereiche",
           "excluded_lights": "Ausgeschlossene Lampen"
@@ -29,26 +22,7 @@
           "excluded_areas": "Für diese Bereiche wird kein Raum-Licht angelegt.",
           "excluded_lights": "Diese Lampen gehören zu keinem Raum-Licht, z. B. Template-Lichter, die andere Lampen steuern."
         }
-      },
-      "offsets": {
-        "title": "Farbtemperatur-Offsets",
-        "description": "Verschiebt die Farbtemperatur einer Lampe, die kälter oder wärmer wirkt als die anderen. Der Offset wirkt, wenn die Farbtemperatur über ein Raum-Licht gesetzt wird.\n\nAktuelle Offsets:\n{offsets}",
-        "data": {
-          "light": "Lampe"
-        }
-      },
-      "offset": {
-        "title": "Offset für {light}",
-        "description": "In Kelvin macht ein negativer Wert die Lampe wärmer, z. B. -300. In Mired macht ein positiver Wert sie wärmer, z. B. +20; ein Mired-Schritt wirkt über den ganzen Bereich gleich groß. 0 entfernt den Offset.",
-        "data": {
-          "unit": "Einheit",
-          "value": "Offset"
-        }
       }
-    },
-    "error": {
-      "offset_too_large": "Der Offset ist zu groß: höchstens {max_kelvin} K oder {max_mired} Mired.",
-      "invalid_light": "Bitte eine einzelne Lampe wählen. Light-Buddy-Raum-Lichter und Lichtgruppen können keinen Offset haben."
     }
   },
   "entity": {
@@ -56,13 +30,13 @@
       "room": {
         "name": "Alle Lichter in {area}"
       }
-    }
-  },
-  "selector": {
-    "unit": {
-      "options": {
-        "K": "Kelvin",
-        "mired": "Mired"
+    },
+    "number": {
+      "color_temp_offset": {
+        "name": "Farbtemperatur-Offset"
+      },
+      "color_temp_offset_light": {
+        "name": "{light} Farbtemperatur-Offset"
       }
     }
   }

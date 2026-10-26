@@ -31,7 +31,7 @@ from homeassistant.const import (
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
 
-from .offset import ColorTempOffset, clamp
+from .offset import apply_offset, clamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def async_split_turn_on(
     hass: HomeAssistant,
     members: Iterable[str],
     params: dict[str, Any],
-    offsets: Mapping[str, ColorTempOffset],
+    offsets: Mapping[str, int],
 ) -> list[tuple[list[str], dict[str, Any]]]:
     """Split turn_on params into as few calls as possible.
 
@@ -62,7 +62,7 @@ def async_split_turn_on(
         if ATTR_COLOR_TEMP_KELVIN in params and (offset := offsets.get(entity_id)):
             attributes = state.attributes if state is not None else {}
             member_params[ATTR_COLOR_TEMP_KELVIN] = clamp(
-                offset.apply(params[ATTR_COLOR_TEMP_KELVIN]),
+                apply_offset(params[ATTR_COLOR_TEMP_KELVIN], offset),
                 attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
                 attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
             )
@@ -94,7 +94,7 @@ class RoomCommander:
         self,
         hass: HomeAssistant,
         interval: float,
-        offsets: Mapping[str, ColorTempOffset],
+        offsets: Mapping[str, int],
     ) -> None:
         """Initialize the commander."""
         self.hass = hass

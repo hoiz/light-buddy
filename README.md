@@ -32,19 +32,19 @@ Wenn du eine Lampe verschiebst, einen Bereich anlegst oder umbenennst, passt sic
 
 Einstellungen → Geräte & Dienste → Light Buddy → **Konfigurieren**:
 
-**Räume**
-
 - **Ausgeschlossene Bereiche**: Für diese Bereiche gibt es kein Raum-Licht.
 - **Ausgeschlossene Lampen**: Diese Lampen gehören zu keinem Raum, z. B. Template-Lichter, die selbst andere Lampen steuern.
 
-**Farbtemperatur-Offsets**
+## Farbtemperatur-Offset
 
-Für eine Lampe, die kälter oder wärmer wirkt als die anderen: Lampe wählen, dann Einheit und Offset eingeben. 0 entfernt den Offset.
+Für eine Lampe, die kälter oder wärmer wirkt als die anderen. Jede farbfähige Lampe in einem Raum hat auf ihrer Geräteseite unter **Konfiguration** einen Schieberegler „Farbtemperatur-Offset“ in Kelvin. Ein negativer Wert macht die Lampe wärmer: Bei -300 bekommt sie 2700 K, wenn der Raum auf 3000 K steht.
 
-- **Kelvin**: Ein negativer Wert macht die Lampe wärmer. Bei -300 bekommt die Lampe 2700 K, wenn der Raum auf 3000 K gestellt wird.
-- **Mired**: Ein positiver Wert macht die Lampe wärmer. Ein Mired-Schritt wirkt über den ganzen Bereich gleich groß, deshalb passt ein Mired-Offset oft besser für warme und kalte Einstellungen zugleich.
+**Live-Vorschau:** Schalte den Raum ein und stelle eine Farbtemperatur ein. Jede Änderung am Schieberegler wirkt dann sofort auf die Lampe, sodass du sie direkt mit den anderen vergleichen kannst.
 
-Der Offset wirkt nur, wenn die Farbtemperatur über ein Raum-Licht gesetzt wird. Steuerst du die Lampe direkt, bekommt sie den Wert ohne Offset. Der Zielwert wird auf den Bereich der Lampe begrenzt. Das Raum-Licht zeigt den gewünschten Wert an, nicht den verschobenen.
+- Der Offset wirkt nur, wenn die Farbtemperatur über ein Raum-Licht gesetzt wird. Steuerst du die Lampe direkt, bekommt sie den Wert ohne Offset.
+- Der Zielwert wird auf den Bereich der Lampe begrenzt.
+- Das Raum-Licht zeigt den gewünschten Wert an, nicht den verschobenen.
+- Die Schieberegler erscheinen nicht auf Dashboards und werden von Bereichs-Aktionen nicht erfasst.
 
 ## Verhalten
 

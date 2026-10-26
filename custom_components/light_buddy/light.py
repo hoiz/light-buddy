@@ -23,7 +23,6 @@ from homeassistant.components.light import (
     brightness_supported,
     color_supported,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_SUPPORTED_FEATURES,
@@ -32,24 +31,14 @@ from homeassistant.const import (
     STATE_UNKNOWN,
 )
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, State, callback
-from homeassistant.helpers import (
-    area_registry as ar,
-    device_registry as dr,
-    entity_registry as er,
-)
-from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import (
     COMMAND_INTERVAL_SECONDS,
-    CONF_EXCLUDED_AREAS,
-    CONF_EXCLUDED_LIGHTS,
-    CONF_OFFSETS,
-    MEMBERSHIP_DEBOUNCE_SECONDS,
 )
-from .membership import async_resolve_rooms
-from .offset import ColorTempOffset, async_resolve_offsets, same_color_temp
+from .manager import LightBuddyConfigEntry
+from .offset import remove_offset, same_color_temp
 from .room import RoomCommander, turn_off_params
 
 _LOGGER = logging.getLogger(__name__)
@@ -63,140 +52,14 @@ FORWARDED_FEATURES = (
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: LightBuddyConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up one room light per area with lights."""
-    RoomManager(hass, entry, async_add_entities).async_setup()
+    """Set up one room light per area with lights.
 
-
-class RoomManager:
-    """Keep the room lights in sync with the area, device and entity registry."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        entry: ConfigEntry,
-        async_add_entities: AddConfigEntryEntitiesCallback,
-    ) -> None:
-        """Initialize the manager."""
-        self.hass = hass
-        self.entry = entry
-        self._async_add_entities = async_add_entities
-        # Shared with all room lights, and updated when entity ids change.
-        self._offsets: dict[str, ColorTempOffset] = {}
-        self._lights: dict[str, RoomLight] = {}
-        self._debouncer = Debouncer(
-            hass,
-            _LOGGER,
-            cooldown=MEMBERSHIP_DEBOUNCE_SECONDS,
-            immediate=False,
-            function=self.async_refresh,
-        )
-
-    @callback
-    def async_setup(self) -> None:
-        """Create the room lights and listen for registry changes."""
-        self.entry.async_on_unload(self._debouncer.async_shutdown)
-        for event_type, event_filter in (
-            (er.EVENT_ENTITY_REGISTRY_UPDATED, _entity_event_filter),
-            (dr.EVENT_DEVICE_REGISTRY_UPDATED, _device_event_filter),
-            (ar.EVENT_AREA_REGISTRY_UPDATED, None),
-        ):
-            self.entry.async_on_unload(
-                self.hass.bus.async_listen(
-                    event_type, self._async_schedule_refresh, event_filter=event_filter
-                )
-            )
-        self.async_refresh()
-
-    @callback
-    def _async_schedule_refresh(self, _event: Event[Any]) -> None:
-        self._debouncer.async_schedule_call()
-
-    @callback
-    def async_refresh(self) -> None:
-        """Add, update and remove room lights to match the areas."""
-        self._offsets.clear()
-        self._offsets.update(
-            async_resolve_offsets(self.hass, self.entry.options.get(CONF_OFFSETS, {}))
-        )
-        rooms = async_resolve_rooms(
-            self.hass,
-            self.entry.options.get(CONF_EXCLUDED_AREAS, ()),
-            self.entry.options.get(CONF_EXCLUDED_LIGHTS, ()),
-        )
-        area_registry = ar.async_get(self.hass)
-        rooms = {
-            area_id: members
-            for area_id, members in rooms.items()
-            if area_registry.async_get_area(area_id) is not None
-        }
-
-        entity_registry = er.async_get(self.hass)
-        for registry_entry in er.async_entries_for_config_entry(
-            entity_registry, self.entry.entry_id
-        ):
-            if registry_entry.unique_id not in rooms:
-                self._lights.pop(registry_entry.unique_id, None)
-                entity_registry.async_remove(registry_entry.entity_id)
-        for area_id in self._lights.keys() - rooms.keys():
-            self.entry.async_create_task(
-                self.hass, _async_remove_light(self._lights.pop(area_id))
-            )
-
-        new_lights: list[RoomLight] = []
-        for area_id, members in rooms.items():
-            name = area_registry.async_get_area(area_id).name  # type: ignore[union-attr]
-            light = self._lights.get(area_id)
-            if light is not None and light.area_name == name:
-                light.async_set_members(members)
-                continue
-            new_light = RoomLight(area_id, name, members, self._offsets)
-            self._lights[area_id] = new_light
-            if light is None:
-                new_lights.append(new_light)
-            else:
-                # Home Assistant caches entity names, so a renamed area needs
-                # a new entity. The registry entry and entity id are kept.
-                self.entry.async_create_task(
-                    self.hass, self._async_replace(light, new_light)
-                )
-        if new_lights:
-            self._async_add_entities(new_lights)
-
-    async def _async_replace(self, old: RoomLight, new: RoomLight) -> None:
-        await _async_remove_light(old)
-        # A later refresh may have removed or replaced the room meanwhile.
-        if self._lights.get(new.area_id) is new:
-            self._async_add_entities([new])
-
-
-async def _async_remove_light(light: RoomLight) -> None:
-    """Remove a room light, unless it never was added, e.g. while disabled."""
-    if light.hass is not None:
-        await light.async_remove()
-
-
-MEMBERSHIP_FIELDS = frozenset({"area_id", "device_id", "disabled_by"})
-
-
-@callback
-def _entity_event_filter(event_data: er.EventEntityRegistryUpdatedData) -> bool:
-    """Lights matter when they are added, removed, renamed or moved."""
-    if not event_data["entity_id"].startswith(f"{LIGHT_DOMAIN}."):
-        return False
-    if event_data["action"] != "update":
-        return True
-    return "old_entity_id" in event_data or not MEMBERSHIP_FIELDS.isdisjoint(
-        event_data["changes"]
-    )
-
-
-@callback
-def _device_event_filter(event_data: dr.EventDeviceRegistryUpdatedData) -> bool:
-    """Devices matter when they are added, removed or moved to another area."""
-    return event_data["action"] != "update" or "area_id" in event_data["changes"]
+    The room manager adds them once all platforms are set up.
+    """
+    entry.runtime_data.async_add_lights = async_add_entities
 
 
 class RoomLight(LightEntity):
@@ -212,7 +75,7 @@ class RoomLight(LightEntity):
         area_id: str,
         name: str,
         members: list[str],
-        offsets: Mapping[str, ColorTempOffset],
+        offsets: Mapping[str, int],
     ) -> None:
         """Initialize the room light."""
         self.area_id = area_id
@@ -226,6 +89,11 @@ class RoomLight(LightEntity):
         self._commander: RoomCommander | None = None
         self._attr_color_mode = ColorMode.ONOFF
         self._attr_supported_color_modes = {ColorMode.ONOFF}
+
+    @property
+    def members(self) -> list[str]:
+        """Return the lights of this room."""
+        return self._members
 
     @property
     @override
@@ -419,9 +287,30 @@ class RoomLight(LightEntity):
                 return requested
             # The light was changed some other way since.
             del self._commander.sent_color_temps[state.entity_id]
-        if (offset := self._offsets.get(state.entity_id)) is not None:
-            return offset.remove(kelvin)
+        if offset := self._offsets.get(state.entity_id):
+            return remove_offset(kelvin, offset)
         return kelvin
+
+    def requested_color_temp(self, entity_id: str) -> float | None:
+        """Return what a light that is on shows without its offset.
+
+        None if the light is off or shows a color.
+        """
+        state = self.hass.states.get(entity_id)
+        if (
+            state is None
+            or state.state != STATE_ON
+            or state.attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP
+        ):
+            return None
+        return self._requested_color_temp(state)
+
+    async def async_set_member_color_temp(self, entity_id: str, kelvin: float) -> None:
+        """Send a color temperature to one light, with its current offset."""
+        assert self._commander is not None
+        await self._commander.async_turn_on(
+            [entity_id], {ATTR_COLOR_TEMP_KELVIN: round(kelvin)}, None
+        )
 
 
 def _mean(values: Any) -> int | None:

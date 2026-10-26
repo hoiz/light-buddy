@@ -176,7 +176,7 @@ class RoomAutomation:
         def _async_start_interval(_now: dt.datetime) -> None:
             self._unsubs.append(
                 async_track_time_interval(
-                    self.hass, self._async_tick, SCHEDULE_INTERVAL
+                    self.hass, self._async_tick_later, SCHEDULE_INTERVAL
                 )
             )
             self._async_track(self._async_tick(dt_util.utcnow()))
@@ -244,14 +244,17 @@ class RoomAutomation:
 
     @callback
     def async_mark_manual(self, attributes: set[str]) -> None:
-        """Leave attributes changed by hand alone until the room is off."""
+        """Leave attributes changed by hand alone until the room is off.
+
+        Every manual change starts the automatic resume over.
+        """
+        self._paused_at = self.hass.loop.time()
+        self._async_start_auto_resume()
         if attributes <= self.paused:
             return
         if not self.paused:
             self.paused_since = dt_util.utcnow()
-        self._paused_at = self.hass.loop.time()
         self.paused |= attributes
-        self._async_start_auto_resume()
         self._async_notify()
 
     @callback
@@ -262,7 +265,7 @@ class RoomAutomation:
             self._unsub_auto_resume = async_call_later(
                 self.hass,
                 max(self.settings.auto_resume_minutes * 60 - elapsed, 0),
-                self._async_auto_resume,
+                self._async_auto_resume_later,
             )
 
     async def async_resume(self) -> None:
@@ -276,7 +279,16 @@ class RoomAutomation:
         """Forget manual changes once all lights of the room are off."""
         self._async_clear_pause()
 
-    async def _async_auto_resume(self, _now: dt.datetime) -> None:
+    @callback
+    def _async_auto_resume_later(self, _now: dt.datetime) -> None:
+        self._async_track(self._async_auto_resume())
+
+    @callback
+    def _async_tick_later(self, now: dt.datetime) -> None:
+        # Tracked, so stopping the automation cancels a running tick.
+        self._async_track(self._async_tick(now))
+
+    async def _async_auto_resume(self) -> None:
         self._unsub_auto_resume = None
         await self.async_resume()
 
@@ -308,10 +320,16 @@ class RoomAutomation:
         self._turned_on.add(entity_id)
         if self._unsub_turned_on is None:
             self._unsub_turned_on = async_call_later(
-                self.hass, TURNED_ON_DEBOUNCE_SECONDS, self._async_apply_turned_on
+                self.hass,
+                TURNED_ON_DEBOUNCE_SECONDS,
+                self._async_apply_turned_on_later,
             )
 
-    async def _async_apply_turned_on(self, _now: dt.datetime) -> None:
+    @callback
+    def _async_apply_turned_on_later(self, _now: dt.datetime) -> None:
+        self._async_track(self._async_apply_turned_on())
+
+    async def _async_apply_turned_on(self) -> None:
         self._unsub_turned_on = None
         members = list(self._turned_on)
         self._turned_on.clear()

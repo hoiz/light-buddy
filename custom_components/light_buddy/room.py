@@ -125,6 +125,19 @@ def async_split_turn_on(
     return calls
 
 
+@dataclass(slots=True)
+class WaitingBrightness:
+    """Brightness to send once the color sent before it is done.
+
+    Newer commands take their lights out of entity_ids, while it waits.
+    """
+
+    calls: list[tuple[list[str], dict[str, Any]]]
+    entity_ids: set[str]
+    # When the color was sent, to tell lights turned off since.
+    sent_at: dt.datetime
+
+
 def split_separate(
     calls: list[tuple[list[str], dict[str, Any]]], separate: Container[str]
 ) -> tuple[
@@ -194,9 +207,8 @@ class RoomCommander:
         self._interval = interval
         self._offsets = offsets
         self._separate = separate
-        # Brightness commands waiting for their color command to finish, with
-        # the lights still waiting for them.
-        self._later: dict[asyncio.Task[None], set[str]] = {}
+        # Brightness commands waiting for their color command to finish.
+        self._later: dict[asyncio.Task[None], WaitingBrightness] = {}
         # Requested and sent color temperature of each light, to show the
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
@@ -349,8 +361,8 @@ class RoomCommander:
             if service == SERVICE_TURN_OFF or ATTR_BRIGHTNESS in params
         }
         for task, waiting in list(self._later.items()):
-            waiting -= replaced
-            if not waiting:
+            waiting.entity_ids -= replaced
+            if not waiting.entity_ids:
                 task.cancel()
 
         if service == SERVICE_TURN_OFF:
@@ -372,12 +384,16 @@ class RoomCommander:
             calls, later = split_separate(calls, self._separate)
 
         # One failing call must not keep the other lights from their command.
+        sent_at = dt_util.utcnow()
         first_error: Exception | None = None
+        failed: set[str] = set()
         for entity_ids, call_params in calls:
             error = await self._async_call(
                 service, entity_ids, call_params, member_params, context
             )
-            first_error = first_error or error
+            if error is not None:
+                first_error = first_error or error
+                failed.update(entity_ids)
         if later:
             # Not waited for, so the caller is not held up by the pause.
             # After the color's half of the transition.
@@ -385,11 +401,19 @@ class RoomCommander:
                 max(params.get(ATTR_TRANSITION, 0) for _, params in later)
                 + SEPARATE_COMMANDS_PAUSE_SECONDS
             )
-            waiting = {entity_id for entity_ids, _ in later for entity_id in entity_ids}
+            # Lights whose color failed get no brightness on its own either.
+            waiting = WaitingBrightness(
+                later,
+                {
+                    entity_id
+                    for entity_ids, _ in later
+                    for entity_id in entity_ids
+                    if entity_id not in failed
+                },
+                sent_at,
+            )
             task = self.hass.async_create_background_task(
-                self._async_send_later(
-                    later, delay, waiting, dt_util.utcnow(), member_params, context
-                ),
+                self._async_send_later(waiting, delay, member_params, context),
                 "light_buddy_separate_commands",
             )
             self._later[task] = waiting
@@ -399,25 +423,23 @@ class RoomCommander:
 
     async def _async_send_later(
         self,
-        calls: list[tuple[list[str], dict[str, Any]]],
+        waiting: WaitingBrightness,
         delay: float,
-        waiting: set[str],
-        sent_at: dt.datetime,
         member_params: MemberParams,
         context: Context,
     ) -> None:
         await asyncio.sleep(delay)
-        for entity_ids, call_params in calls:
+        for entity_ids, call_params in waiting.calls:
             # Lights turned off since the color was sent, e.g. by a wall
             # switch, stay off. Lights that did not report on yet still get it.
             if send := [
                 entity_id
                 for entity_id in entity_ids
-                if entity_id in waiting
+                if entity_id in waiting.entity_ids
                 and not (
                     (state := self.hass.states.get(entity_id)) is not None
                     and state.state != STATE_ON
-                    and state.last_changed >= sent_at
+                    and state.last_changed >= waiting.sent_at
                 )
             ]:
                 await self._async_call(

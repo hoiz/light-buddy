@@ -253,9 +253,11 @@ def point_columns(point: SchedulePoint, language: str) -> tuple[str, str, str, s
 
 def format_point(point: SchedulePoint, language: str) -> str:
     """Return a point as one line, e.g. "06:30 · 3000 K · 40 % · Mo-Fr"."""
-    columns = point_columns(point, language)
-    # Without brightness, the line leaves it out instead of showing a dash.
-    return " · ".join(column for column in columns if column != DASH)
+    time, kelvin, brightness, days = point_columns(point, language)
+    if point.brightness is None:
+        # Left out instead of shown as a dash.
+        return " · ".join((time, kelvin, days))
+    return " · ".join((time, kelvin, brightness, days))
 
 
 TABLE_HEADERS = {

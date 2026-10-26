@@ -24,6 +24,7 @@ from homeassistant.components.light import (
     LightEntityFeature,
     brightness_supported,
     color_supported,
+    color_temp_supported,
 )
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -127,7 +128,7 @@ class RoomLight(LightEntity):
         self._turning_off_until = 0.0
         self._turned_off_at: dict[str, float] = {}
         # What lights showed when last changed outside Home Assistant.
-        self._manual_kelvin: dict[str, ShownColor] = {}
+        self._manual_color: dict[str, ShownColor] = {}
         self._unsub_members: CALLBACK_TYPE | None = None
         self._commander: RoomCommander | None = None
         self._attr_color_mode = ColorMode.ONOFF
@@ -212,7 +213,7 @@ class RoomLight(LightEntity):
         entity_id = new_state.entity_id
         if old_state.state == STATE_ON and new_state.state != STATE_ON:
             self._turned_off_at[entity_id] = now
-            self._manual_kelvin.pop(entity_id, None)
+            self._manual_color.pop(entity_id, None)
             if commander is not None:
                 commander.async_forget_sent([entity_id])
         elif (
@@ -221,6 +222,8 @@ class RoomLight(LightEntity):
             and old_state.state == STATE_ON
             and new_state.state == STATE_ON
             and not commander.is_own_context(new_state.context)
+            # Lights report their values while the room fades out, too.
+            and not self._turning_off(now)
             and self._changed_elsewhere(new_state, now)
         ):
             automation.async_mark_manual(new_change=self._is_new_change(new_state))
@@ -251,8 +254,7 @@ class RoomLight(LightEntity):
         return (
             sent is not None
             and sent.settled(now, TRANSITION_GRACE_SECONDS)
-            and ColorMode.COLOR_TEMP
-            in (attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ())
+            and color_temp_supported(attributes.get(ATTR_SUPPORTED_COLOR_MODES))
             and _differs(
                 (ColorMode.COLOR_TEMP, reachable_kelvin(sent.value, attributes)),
                 _shown(attributes),
@@ -267,16 +269,16 @@ class RoomLight(LightEntity):
         count, like turning a remote's color step by step.
         """
         shown = _shown(state.attributes)
-        last = self._manual_kelvin.get(state.entity_id)
+        last = self._manual_color.get(state.entity_id)
         if last is not None and not _differs(last, shown):
             return False
-        self._manual_kelvin[state.entity_id] = shown
+        self._manual_color[state.entity_id] = shown
         return True
 
     @callback
     def async_take_shown(self) -> None:
         """Compare later changes with what the lights show now."""
-        self._manual_kelvin.clear()
+        self._manual_color.clear()
         if self._commander is not None:
             self._commander.async_take_shown(self._members)
 
@@ -334,8 +336,9 @@ class RoomLight(LightEntity):
                 entity_id: target
                 for entity_id in off
                 if (state := states[entity_id]) is None
-                or ColorMode.COLOR_TEMP
-                in (state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ())
+                or color_temp_supported(
+                    state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
+                )
             }
         if members:
             await self._commander.async_turn_on(
@@ -567,8 +570,10 @@ def _differs(value: ShownColor, other: ShownColor) -> bool:
     A change of color mode counts, too.
     """
     (mode, kelvin), (other_mode, other_kelvin) = value, other
-    if mode != other_mode or kelvin is None or other_kelvin is None:
-        return mode != other_mode or (kelvin is None) != (other_kelvin is None)
+    if mode != other_mode:
+        return True
+    if kelvin is None or other_kelvin is None:
+        return (kelvin is None) != (other_kelvin is None)
     return abs(kelvin - other_kelvin) >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN
 
 

@@ -549,3 +549,34 @@ async def test_slow_tick_skips_next(
     assert automation._tasks == tasks
     running.set_result(None)
     await hass.async_block_till_done()
+
+
+async def test_room_fading_out_is_not_manual(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Reports while the room fades out do not pause it."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    await _sent_target(hass, automation, lamp)
+
+    await _room(hass).async_turn_off(transition=10)
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20), context=Context())
+    await hass.async_block_till_done()
+    assert not automation.paused
+
+
+async def test_resume_forgets_lights_without_color_temp_shown(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light showing no color temperature yet has nothing to compare."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    await _sent_target(hass, automation, lamp)
+    hass.states.async_set(
+        lamp, STATE_ON, {**_on(4000), "color_temp_kelvin": None}, context=Context()
+    )
+    await hass.async_block_till_done()
+
+    automation._async_clear_pause()
+    assert lamp not in _room(hass)._commander.last_sent

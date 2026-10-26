@@ -257,6 +257,9 @@ class RoomCommander:
                 continue
             if (kelvin := state.attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None:
                 self.last_sent[entity_id] = SentValue(kelvin, now)
+            else:
+                # Nothing shown yet, e.g. right after power on.
+                self.last_sent.pop(entity_id, None)
 
     @property
     def turning_off(self) -> bool:

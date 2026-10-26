@@ -230,3 +230,25 @@ async def test_wall_switch_in_color_context_stays_off(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
     await hass.async_block_till_done()
     assert len(calls) == 1
+
+
+async def test_late_off_of_own_turn_off_keeps_brightness(
+    hass: HomeAssistant, add_light, setup_integration, freezer
+) -> None:
+    """Off reported late for our own turn off, in the color's context, is ours."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    calls = async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    commander = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")._commander
+    hass.states.async_set(ikea, STATE_ON, COLOR_LIGHT)
+    await commander._async_send("turn_off", {ikea: {"transition": 1}}, None)
+
+    await commander.async_send_now(
+        {ikea: {"brightness": 100, "color_temp_kelvin": 3000}}
+    )
+    color_context = calls[0].context
+    freezer.tick(0.1)
+    hass.states.async_set(ikea, STATE_OFF, COLOR_LIGHT, context=color_context)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert calls[-1].data == {"entity_id": [ikea], "brightness": 100}

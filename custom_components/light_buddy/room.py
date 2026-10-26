@@ -54,6 +54,10 @@ NOT_COLOR_TEMP_ATTRS = COLOR_GROUP_ATTRS - {ATTR_COLOR_TEMP_KELVIN}
 
 # Enough to recognize the state changes our recent commands cause.
 OWN_CONTEXTS = 50
+# Lights report off this long after a turn off of ours, after its transition.
+OWN_TURN_OFF_GRACE_SECONDS = 5
+# A light that does not answer a call within this is given up on.
+CALL_TIMEOUT_SECONDS = 10
 
 type MemberParams = dict[str, dict[str, Any]]
 
@@ -213,7 +217,8 @@ class RoomCommander:
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
         self._own_context_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
-        self._own_turn_off_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
+        # Until when lights we turned off may still report off, by loop time.
+        self._turning_off_until: dict[str, float] = {}
         # The last color temperature and brightness each light got, to tell
         # later changes made elsewhere.
         self.last_sent: dict[str, dict[str, SentValue]] = {}
@@ -355,7 +360,13 @@ class RoomCommander:
             context = Context()
         self._own_context_ids.append(context.id)
         if service == SERVICE_TURN_OFF:
-            self._own_turn_off_ids.append(context.id)
+            until = (
+                self.hass.loop.time()
+                + next(iter(member_params.values()), {}).get(ATTR_TRANSITION, 0)
+                + OWN_TURN_OFF_GRACE_SECONDS
+            )
+            for entity_id in member_params:
+                self._turning_off_until[entity_id] = until
         # A newer brightness, or a turn off, replaces brightness still waiting
         # for the same lights. Other lights of that command keep waiting.
         replaced = {
@@ -436,8 +447,9 @@ class RoomCommander:
         for entity_ids, call_params in waiting.calls:
             # Lights turned off by others since the color was sent, e.g. by a
             # wall switch, stay off. Lights that did not report on yet still
-            # get it, as do lights reporting the end of our own turn off. Not
-            # any context of ours: lights keep that of the color a while.
+            # get it, as do lights reporting the end of a turn off of ours.
+            # Contexts do not tell these apart: lights keep the color's a while.
+            now = self.hass.loop.time()
             if send := [
                 entity_id
                 for entity_id in entity_ids
@@ -446,7 +458,7 @@ class RoomCommander:
                     (state := self.hass.states.get(entity_id)) is not None
                     and state.state != STATE_ON
                     and state.last_changed >= waiting.sent_at
-                    and state.context.id not in self._own_turn_off_ids
+                    and now >= self._turning_off_until.get(entity_id, 0)
                 )
             ]:
                 await self._async_call(
@@ -461,17 +473,25 @@ class RoomCommander:
         member_params: MemberParams,
         context: Context,
     ) -> Exception | None:
-        """Send one service call and remember what it sent, or the error."""
+        """Send one service call and remember what it sent, or the error.
+
+        Lights that never answer are given up on, so the other lights still
+        get their commands.
+        """
         try:
-            await self.hass.services.async_call(
-                LIGHT_DOMAIN,
-                service,
-                {**call_params, ATTR_ENTITY_ID: entity_ids},
-                blocking=True,
-                context=context,
-            )
+            async with asyncio.timeout(CALL_TIMEOUT_SECONDS) as timeout:
+                await self.hass.services.async_call(
+                    LIGHT_DOMAIN,
+                    service,
+                    {**call_params, ATTR_ENTITY_ID: entity_ids},
+                    blocking=True,
+                    context=context,
+                )
         except Exception as err:
-            _LOGGER.warning("Sending %s to %s failed: %s", service, entity_ids, err)
+            if isinstance(err, TimeoutError) and timeout.expired():
+                _LOGGER.warning("%s did not answer %s in time", entity_ids, service)
+            else:
+                _LOGGER.warning("Sending %s to %s failed: %s", service, entity_ids, err)
             return err
         if service == SERVICE_TURN_ON:
             self._async_remember_sent(entity_ids, call_params)

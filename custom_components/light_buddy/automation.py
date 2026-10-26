@@ -49,8 +49,6 @@ _LOGGER = logging.getLogger(__name__)
 TURNED_ON_DEBOUNCE_SECONDS = 0.3
 # A pause this recent is not ended by a room that looks off.
 RECENT_PAUSE_SECONDS = 10
-# Applying the schedule gives up after this, before the next tick is due.
-APPLY_TIMEOUT_SECONDS = 55
 
 
 # Also the forms of service calls, before Home Assistant converts them.
@@ -368,18 +366,15 @@ class RoomAutomation:
             if not self.active or (light := self.light) is None:
                 return
             assert self.target is not None
+            # Lights that never answer are given up on per call.
             try:
-                # A light that never answers must not hold up the schedule.
-                async with asyncio.timeout(APPLY_TIMEOUT_SECONDS):
-                    await light.async_apply_target(
-                        self.target,
-                        self.settings.transition if transition is None else transition,
-                        members=members,
-                        threshold=self.settings.threshold,
-                        paused=frozenset(self.paused),
-                    )
-            except TimeoutError:
-                _LOGGER.warning("Lights in %s did not answer in time", self.area_id)
+                await light.async_apply_target(
+                    self.target,
+                    self.settings.transition if transition is None else transition,
+                    members=members,
+                    threshold=self.settings.threshold,
+                    paused=frozenset(self.paused),
+                )
             except Exception:
                 # Failed calls are logged per light, the next tick tries again.
                 _LOGGER.debug("Applying the schedule in %s failed", self.area_id)

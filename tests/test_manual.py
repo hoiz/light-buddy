@@ -664,18 +664,23 @@ async def test_new_remote_change_restarts_resume(
 async def test_lights_not_answering_do_not_block(
     hass: HomeAssistant, add_light, setup_integration, monkeypatch
 ) -> None:
-    """A light that never answers gives up the apply, the next one runs."""
-    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
-    monkeypatch.setattr(
-        "custom_components.light_buddy.automation.APPLY_TIMEOUT_SECONDS", 0.05
+    """A light that never answers is given up on, the others get their command."""
+    automation, lamps = await _setup_room(
+        hass, add_light, setup_integration, "a_hangs", "b_answers"
     )
+    monkeypatch.setattr("custom_components.light_buddy.room.CALL_TIMEOUT_SECONDS", 0.05)
     hang = hass.loop.create_future()
+    answered = []
 
-    async def never_answers(call) -> None:
-        await hang
+    async def turn_on(call) -> None:
+        if lamps[0] in call.data["entity_id"]:
+            await hang
+        answered.append(call.data["entity_id"])
 
-    hass.services.async_register("light", "turn_on", never_answers)
-    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    hass.services.async_register("light", "turn_on", turn_on)
+    # Different values, so the lights get separate calls.
+    hass.states.async_set(lamps[0], STATE_ON, _on(3000, 20))
+    hass.states.async_set(lamps[1], STATE_ON, _on(4000, 20))
     await hass.async_block_till_done()
 
     # Time is frozen in these tests, so the timeout is moved on by hand.
@@ -683,6 +688,50 @@ async def test_lights_not_answering_do_not_block(
     await asyncio.sleep(0)
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
     await asyncio.wait_for(resume, 5)
-    assert not automation._apply_lock.locked()
-    # Giving up cancelled the call that never answered.
+    assert answered == [[lamps[1]]]
     assert hang.cancelled()
+
+
+async def test_own_changes_do_not_restart_resume(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Our own color changes do not count as new changes of a paused brightness."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+    await automation.async_resume()
+    _age_last_sent(hass, lamp)
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 60), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == {"brightness"}
+    automation._paused_at -= 100
+    paused_at = automation._paused_at
+
+    # The schedule moves the color, the report comes after our context ran out.
+    await _room(hass)._commander.async_send_now({lamp: {"color_temp_kelvin": 3500}})
+    _age_last_sent(hass, lamp)
+    hass.states.async_set(lamp, STATE_ON, _on(3500, 60), context=Context())
+    await hass.async_block_till_done()
+    assert automation._paused_at == paused_at
+
+
+async def test_dimming_in_small_steps_counts(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Dimming step by step adds up to a new change."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+    await automation.async_resume()
+    _age_last_sent(hass, lamp)
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 100), context=Context())
+    await hass.async_block_till_done()
+    automation._paused_at -= 100
+    paused_at = automation._paused_at
+
+    for brightness in (95, 90, 85):
+        hass.states.async_set(lamp, STATE_ON, _on(4000, brightness), context=Context())
+        await hass.async_block_till_done()
+    assert automation._paused_at > paused_at

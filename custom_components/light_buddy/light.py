@@ -133,6 +133,8 @@ class RoomLight(LightEntity):
         self._turned_off_at: dict[str, float] = {}
         # Lights turned off by others with a transition, until when.
         self._member_turning_off_until: dict[str, float] = {}
+        # What lights showed when last changed outside Home Assistant.
+        self._manual_values: dict[str, dict[str, ShownValue]] = {}
         self._unsub_members: CALLBACK_TYPE | None = None
         self._commander: RoomCommander | None = None
         self._attr_color_mode = ColorMode.ONOFF
@@ -218,6 +220,7 @@ class RoomLight(LightEntity):
         if old_state.state == STATE_ON and new_state.state != STATE_ON:
             self._turned_off_at[entity_id] = now
             self._member_turning_off_until.pop(entity_id, None)
+            self._manual_values.pop(entity_id, None)
             if commander is not None:
                 commander.async_forget_sent([entity_id])
         elif (
@@ -231,10 +234,8 @@ class RoomLight(LightEntity):
             and now >= self._member_turning_off_until.get(entity_id, 0)
             and (attributes := self._changed_elsewhere(new_state, now))
         ):
-            # A new change starts the automatic resume over, a light only
-            # reporting the same difference again does not.
             automation.async_mark_manual(
-                attributes, command=_changed(old_state, new_state)
+                attributes, command=self._is_new_change(new_state, attributes)
             )
         elif (
             self._automation is not None
@@ -261,29 +262,46 @@ class RoomLight(LightEntity):
         sent = self._commander.last_sent.get(state.entity_id) or {}
         attributes = state.attributes
         changed = set()
-
         if (
             (sent_kelvin := sent.get(ATTR_COLOR_TEMP_KELVIN)) is not None
             and sent_kelvin.settled(now, TRANSITION_GRACE_SECONDS)
             and ColorMode.COLOR_TEMP
             in (attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ())
+            and _differs(
+                PAUSE_COLOR_TEMP,
+                (ColorMode.COLOR_TEMP, reachable_kelvin(sent_kelvin.value, attributes)),
+                _shown(PAUSE_COLOR_TEMP, attributes),
+            )
         ):
-            kelvin = attributes.get(ATTR_COLOR_TEMP_KELVIN)
-            if (
-                attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP
-                or kelvin is None
-                or abs(kelvin - reachable_kelvin(sent_kelvin.value, attributes))
-                >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN
-            ):
-                changed.add(PAUSE_COLOR_TEMP)
+            changed.add(PAUSE_COLOR_TEMP)
         if (
             (sent_brightness := sent.get(ATTR_BRIGHTNESS)) is not None
             and sent_brightness.settled(now, TRANSITION_GRACE_SECONDS)
-            and (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None
-            and abs(brightness - sent_brightness.value) >= MANUAL_BRIGHTNESS_THRESHOLD
+            and attributes.get(ATTR_BRIGHTNESS) is not None
+            and _differs(
+                PAUSE_BRIGHTNESS,
+                sent_brightness.value,
+                _shown(PAUSE_BRIGHTNESS, attributes),
+            )
         ):
             changed.add(PAUSE_BRIGHTNESS)
         return changed
+
+    def _is_new_change(self, state: State, attributes: set[str]) -> bool:
+        """Return True if a light changed since its last change by hand.
+
+        A light keeps reporting the difference to what we sent, which is no
+        new change. Compared with the start of the change, also slow ones
+        count, like dimming with a remote step by step.
+        """
+        values = self._manual_values.setdefault(state.entity_id, {})
+        new = False
+        for attr in attributes:
+            shown = _shown(attr, state.attributes)
+            if attr not in values or _differs(attr, values[attr], shown):
+                values[attr] = shown
+                new = True
+        return new
 
     @callback
     def async_member_turning_off(self, entity_id: str, transition: float) -> None:
@@ -295,6 +313,7 @@ class RoomLight(LightEntity):
     @callback
     def async_take_shown(self) -> None:
         """Compare later changes with what the lights show now."""
+        self._manual_values.clear()
         if self._commander is not None:
             self._commander.async_take_shown(self._members)
 
@@ -581,23 +600,33 @@ class RoomLight(LightEntity):
         )
 
 
-def _changed(old_state: State, new_state: State) -> bool:
-    """Return True if a light changed noticeably between two reports."""
-    old, new = old_state.attributes, new_state.attributes
-    if old.get(ATTR_COLOR_MODE) != new.get(ATTR_COLOR_MODE):
+type ShownValue = tuple[str | None, float | None] | float | None
+
+
+def _shown(attr: str, attributes: Mapping[str, Any]) -> ShownValue:
+    """Return what a light shows of a paused attribute."""
+    if attr == PAUSE_COLOR_TEMP:
+        return (attributes.get(ATTR_COLOR_MODE), attributes.get(ATTR_COLOR_TEMP_KELVIN))
+    return attributes.get(ATTR_BRIGHTNESS)
+
+
+def _differs(attr: str, value: ShownValue, other: ShownValue) -> bool:
+    """Return True if two values of an attribute look different.
+
+    For color temperature, a change of color mode counts, too.
+    """
+    if attr == PAUSE_COLOR_TEMP:
+        assert isinstance(value, tuple) and isinstance(other, tuple)
+        (mode, kelvin), (other_mode, other_kelvin) = value, other
+        if mode != other_mode or (kelvin is None) != (other_kelvin is None):
+            return True
+        return kelvin is not None and (
+            abs(kelvin - other_kelvin) >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN  # type: ignore[operator]
+        )
+    if (value is None) != (other is None):
         return True
-    old_kelvin = old.get(ATTR_COLOR_TEMP_KELVIN)
-    new_kelvin = new.get(ATTR_COLOR_TEMP_KELVIN)
-    if (old_kelvin is None) != (new_kelvin is None) or (
-        old_kelvin is not None
-        and abs(new_kelvin - old_kelvin) >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN
-    ):
-        return True
-    old_brightness = old.get(ATTR_BRIGHTNESS)
-    new_brightness = new.get(ATTR_BRIGHTNESS)
-    return (old_brightness is None) != (new_brightness is None) or (
-        old_brightness is not None
-        and abs(new_brightness - old_brightness) >= MANUAL_BRIGHTNESS_THRESHOLD
+    return value is not None and (
+        abs(value - other) >= MANUAL_BRIGHTNESS_THRESHOLD  # type: ignore[operator]
     )
 
 

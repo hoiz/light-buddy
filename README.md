@@ -4,7 +4,7 @@ Custom Integration für Home Assistant: **ein Licht pro Raum**, ohne Lichtgruppe
 
 Für jeden Bereich (Area) mit mindestens einer Lampe legt Light Buddy eine Licht-Entität an, z. B. `light.all_wohnzimmer` mit dem Namen „Alle Lichter in Wohnzimmer“ (auf Englisch „All lights in Wohnzimmer“). Sie schaltet und dimmt alle Lampen des Bereichs gemeinsam und funktioniert in einer normalen Dashboard-Kachel mit Helligkeitsregler.
 
-Dazu kommt ein Farbtemperatur-Offset pro Lampe. Geplant: Farbtemperatur nach Tageszeit, Disco-Modus.
+Dazu kommen ein Farbtemperatur-Offset pro Lampe und ein Zeitplan für die Farbtemperatur. Geplant: Disco-Modus.
 
 ## Voraussetzungen
 
@@ -56,6 +56,34 @@ Weitere Hinweise:
 - Das Raum-Licht zeigt den gewünschten Wert an, nicht den verschobenen.
 - Die Einstellungen erscheinen nicht auf Dashboards und werden von Bereichs-Aktionen nicht erfasst.
 - Lampen, die nur Farben können, haben keinen Offset.
+
+## Zeitplan
+
+Jeder Raum folgt einem Zeitplan für die Farbtemperatur. Zwischen den Zeitpunkten wird gleitend übergeblendet, auch über Mitternacht. Die Kurve folgt dem Tageslicht und ist mittags am kältesten:
+
+| Uhrzeit | Farbtemperatur |
+|---|---|
+| 05:30 | 2200 K |
+| 06:30 | 3000 K |
+| 08:00 | 4000 K |
+| 12:30 | 5000 K |
+| 16:00 | 4500 K |
+| 18:30 | 3500 K |
+| 21:00 | 2700 K |
+| 22:30 | 2200 K |
+
+Pro Raum gibt es:
+
+- **Zeitplan** (`switch.schedule_<bereich>`): schaltet den Zeitplan für den Raum ein oder aus.
+- **Ziel-Farbtemperatur** (`sensor.target_color_temperature_<bereich>`): der aktuelle Zielwert, z. B. für eigene Automationen.
+
+So verhält sich der Zeitplan:
+
+- **Einschalten über das Raum-Licht:** Ausgeschaltete Lampen gehen direkt mit dem Zielwert an, ohne vorher die alte Farbe zu zeigen. Mit einer eigenen Farbe (z. B. aus einer Szene) bleibt die Farbe unverändert.
+- **Einschalten an der Lampe selbst oder per Wandschalter:** Die Lampe bekommt den Zielwert innerhalb von etwa einer Sekunde.
+- **Laufende Anpassung:** Jede Minute bekommen eingeschaltete Lampen den Zielwert mit einem kurzen Übergang von 2 s. Gesendet wird nur, wenn die Lampe mindestens 50 K davon entfernt ist. Die Räume sind dabei über die Minute verteilt.
+- **Farbige Lampen:** Lampen, die gerade eine Farbe zeigen, lässt der Zeitplan in Ruhe.
+- **Offsets:** Farbtemperatur-Offsets gelten auch für den Zeitplan.
 
 ## Verhalten
 

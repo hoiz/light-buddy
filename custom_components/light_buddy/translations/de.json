@@ -54,6 +54,21 @@
           "mired": "Mired"
         }
       }
+    },
+    "switch": {
+      "schedule": {
+        "name": "Zeitplan {area}"
+      }
+    },
+    "sensor": {
+      "target_color_temperature": {
+        "name": "Ziel-Farbtemperatur {area}",
+        "state_attributes": {
+          "brightness": {
+            "name": "Helligkeit"
+          }
+        }
+      }
     }
   }
 }

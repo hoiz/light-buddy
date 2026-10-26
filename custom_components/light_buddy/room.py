@@ -1,5 +1,6 @@
 """Send commands to the lights of a room."""
 
+from collections import deque
 from collections.abc import Iterable, Mapping
 import logging
 from typing import Any
@@ -27,6 +28,7 @@ from homeassistant.const import (
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
+    STATE_ON,
 )
 from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later
@@ -40,31 +42,36 @@ COLOR_ATTRS = frozenset(
 )
 COLOR_GROUP_ATTRS = COLOR_ATTRS | {ATTR_COLOR_TEMP_KELVIN, ATTR_WHITE}
 
+# Enough to recognize the state changes our recent commands cause.
+OWN_CONTEXTS = 50
+
+type MemberParams = dict[str, dict[str, Any]]
+
 
 @callback
 def async_split_turn_on(
     hass: HomeAssistant,
-    members: Iterable[str],
-    params: dict[str, Any],
+    member_params: Mapping[str, dict[str, Any]],
     offsets: Mapping[str, ColorTempOffset],
 ) -> list[tuple[list[str], dict[str, Any]]]:
-    """Split turn_on params into as few calls as possible.
+    """Turn the params of each light into as few calls as possible.
 
     Lights that receive identical params share one service call. Colors only go
     to lights that support color, because Home Assistant would otherwise turn a
     color into some color temperature on white lights. Lights with an offset
-    get their own color temperature.
+    get their own color temperature. Lights that are on and get no params are
+    left out, as the command would not change them.
     """
     calls: list[tuple[list[str], dict[str, Any]]] = []
-    for entity_id in members:
-        member_params = dict(params)
+    for entity_id, requested in member_params.items():
+        params = dict(requested)
         state = hass.states.get(entity_id)
         if (
             ATTR_COLOR_TEMP_KELVIN in params
             and (offset := offsets.get(entity_id)) is not None
         ):
             attributes = state.attributes if state is not None else {}
-            member_params[ATTR_COLOR_TEMP_KELVIN] = clamp(
+            params[ATTR_COLOR_TEMP_KELVIN] = clamp(
                 offset.apply(params[ATTR_COLOR_TEMP_KELVIN]),
                 attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
                 attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
@@ -72,18 +79,30 @@ def async_split_turn_on(
         if state is not None:
             if not color_supported(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)):
                 for attr in COLOR_ATTRS:
-                    member_params.pop(attr, None)
-            if ATTR_EFFECT in member_params and member_params[ATTR_EFFECT] not in (
+                    params.pop(attr, None)
+            if ATTR_EFFECT in params and params[ATTR_EFFECT] not in (
                 state.attributes.get(ATTR_EFFECT_LIST) or ()
             ):
-                del member_params[ATTR_EFFECT]
+                del params[ATTR_EFFECT]
+            if not params and state.state == STATE_ON:
+                continue
         for entity_ids, call_params in calls:
-            if call_params == member_params:
+            if call_params == params:
                 entity_ids.append(entity_id)
                 break
         else:
-            calls.append(([entity_id], member_params))
+            calls.append(([entity_id], params))
     return calls
+
+
+def merge_params(older: dict[str, Any], newer: dict[str, Any]) -> dict[str, Any]:
+    """Merge two turn_on params, the newer ones win."""
+    # Home Assistant accepts only one color descriptor per call.
+    if not COLOR_GROUP_ATTRS.isdisjoint(newer):
+        older = {
+            key: value for key, value in older.items() if key not in COLOR_GROUP_ATTRS
+        }
+    return {**older, **newer}
 
 
 class RoomCommander:
@@ -106,27 +125,50 @@ class RoomCommander:
         # Requested and sent color temperature of each light, to show the
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
+        self._own_context_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
         self._next_allowed = 0.0
-        self._pending: tuple[str, list[str], dict[str, Any], Context | None] | None = (
-            None
-        )
+        self._pending: tuple[str, MemberParams, Context | None] | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
 
+    def is_own_context(self, context: Context) -> bool:
+        """Return True if a state change was caused by one of our commands."""
+        return context.id in self._own_context_ids or (
+            context.parent_id is not None and context.parent_id in self._own_context_ids
+        )
+
     async def async_turn_on(
-        self, members: list[str], params: dict[str, Any], context: Context | None
+        self,
+        members: Iterable[str],
+        params: dict[str, Any],
+        context: Context | None,
+        overrides: Mapping[str, dict[str, Any]] | None = None,
     ) -> None:
-        """Turn on the given lights."""
-        await self._async_submit(SERVICE_TURN_ON, members, params, context)
+        """Turn on the given lights, some of them with additional params."""
+        overrides = overrides or {}
+        await self._async_submit(
+            SERVICE_TURN_ON,
+            {
+                entity_id: {**params, **overrides.get(entity_id, {})}
+                for entity_id in members
+            },
+            context,
+        )
 
     async def async_turn_off(
-        self, members: list[str], params: dict[str, Any], context: Context | None
+        self, members: Iterable[str], params: dict[str, Any], context: Context | None
     ) -> None:
         """Turn off the given lights."""
-        await self._async_submit(SERVICE_TURN_OFF, members, params, context)
+        await self._async_submit(
+            SERVICE_TURN_OFF, dict.fromkeys(members, params), context
+        )
 
-    async def async_send_now(self, members: list[str], params: dict[str, Any]) -> None:
-        """Turn on the given lights at once, apart from throttled commands."""
-        await self._async_send(SERVICE_TURN_ON, members, params, None)
+    async def async_send_now(self, member_params: MemberParams) -> None:
+        """Turn on lights at once with their own params, apart from throttling.
+
+        For commands of Light Buddy itself, which must not be merged with the
+        room's commands.
+        """
+        await self._async_send(SERVICE_TURN_ON, member_params, Context())
 
     @callback
     def async_cancel(self) -> None:
@@ -137,33 +179,25 @@ class RoomCommander:
         self._pending = None
 
     async def _async_submit(
-        self,
-        service: str,
-        members: list[str],
-        params: dict[str, Any],
-        context: Context | None,
+        self, service: str, member_params: MemberParams, context: Context | None
     ) -> None:
         now = self.hass.loop.time()
         if self._unsub_timer is None and now >= self._next_allowed:
             self._next_allowed = now + self._interval
-            await self._async_send(service, members, params, context)
+            await self._async_send(service, member_params, context)
             return
 
-        if (
-            self._pending is not None
-            and service == SERVICE_TURN_ON
-            and self._pending[0] == SERVICE_TURN_ON
-        ):
-            older = self._pending[2]
-            # Home Assistant accepts only one color descriptor per call.
-            if not COLOR_GROUP_ATTRS.isdisjoint(params):
-                older = {
-                    key: value
-                    for key, value in older.items()
-                    if key not in COLOR_GROUP_ATTRS
-                }
-            params = {**older, **params}
-        self._pending = (service, members, params, context)
+        if self._pending is not None and service == self._pending[0] == SERVICE_TURN_ON:
+            # Lights only in the older command still need it.
+            older = self._pending[1]
+            member_params = {
+                **older,
+                **{
+                    entity_id: merge_params(older.get(entity_id, {}), params)
+                    for entity_id, params in member_params.items()
+                },
+            }
+        self._pending = (service, member_params, context)
         if self._unsub_timer is None:
             self._unsub_timer = async_call_later(
                 self.hass, max(self._next_allowed - now, 0), self._async_flush
@@ -173,30 +207,31 @@ class RoomCommander:
         self._unsub_timer = None
         if self._pending is None:
             return
-        service, members, params, context = self._pending
+        service, member_params, context = self._pending
         self._pending = None
         self._next_allowed = self.hass.loop.time() + self._interval
-        await self._async_send(service, members, params, context)
+        await self._async_send(service, member_params, context)
 
     async def _async_send(
-        self,
-        service: str,
-        members: list[str],
-        params: dict[str, Any],
-        context: Context | None,
+        self, service: str, member_params: MemberParams, context: Context | None
     ) -> None:
+        if context is None:
+            context = Context()
+        self._own_context_ids.append(context.id)
+
         if service == SERVICE_TURN_OFF:
             # Checked when sending, so lights a pending turn_on just switched
             # on are included.
             members = [
                 entity_id
-                for entity_id in members
+                for entity_id in member_params
                 if (state := self.hass.states.get(entity_id)) is None
                 or state.state != STATE_OFF
             ]
+            params = next(iter(member_params.values()), {})
             calls = [(members, params)] if members else []
         else:
-            calls = async_split_turn_on(self.hass, members, params, self._offsets)
+            calls = async_split_turn_on(self.hass, member_params, self._offsets)
 
         # One failing call must not keep the other lights from their command.
         first_error: Exception | None = None
@@ -216,7 +251,7 @@ class RoomCommander:
             if ATTR_COLOR_TEMP_KELVIN in call_params:
                 for entity_id in entity_ids:
                     self.sent_color_temps[entity_id] = (
-                        params[ATTR_COLOR_TEMP_KELVIN],
+                        member_params[entity_id][ATTR_COLOR_TEMP_KELVIN],
                         call_params[ATTR_COLOR_TEMP_KELVIN],
                     )
         if first_error is not None:

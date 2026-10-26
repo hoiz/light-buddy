@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.light_buddy.automation import RoomAutomation
 from custom_components.light_buddy.const import DOMAIN
 from homeassistant.components.light import ColorMode
 from homeassistant.const import STATE_OFF
@@ -94,10 +95,21 @@ def _area_id(hass: HomeAssistant, name: str) -> str:
 
 
 @pytest.fixture
-async def setup_integration(hass: HomeAssistant) -> Callable[..., Any]:
+async def setup_integration(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch
+) -> Callable[..., Any]:
     """Set up Light Buddy, optionally with options."""
 
-    async def _setup(options: dict[str, Any] | None = None) -> MockConfigEntry:
+    async def _setup(
+        options: dict[str, Any] | None = None, *, schedule: bool = False
+    ) -> MockConfigEntry:
+        """Set up the integration.
+
+        Schedules do not start unless asked for, so tests of other features
+        are not affected by the time of day.
+        """
+        if not schedule:
+            monkeypatch.setattr(RoomAutomation, "async_start", lambda self: None)
         entry = MockConfigEntry(
             domain=DOMAIN, title="Light Buddy", options=options or {}
         )

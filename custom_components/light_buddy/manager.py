@@ -1,4 +1,4 @@
-"""Keep room lights and offset settings in sync with the registries."""
+"""Keep the entities of all rooms in sync with the registries."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from homeassistant.helpers import (
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .automation import RoomAutomation
 from .const import (
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
@@ -32,13 +33,13 @@ from .membership import async_resolve_rooms
 from .offset import ColorTempOffset
 
 if TYPE_CHECKING:
-    from .entity import LightOffsetEntity
+    from .entity import LightOffsetEntity, RoomEntity
     from .light import RoomLight
 
 _LOGGER = logging.getLogger(__name__)
 
 type LightBuddyConfigEntry = ConfigEntry[RoomManager]
-type ManagedEntity = RoomLight | LightOffsetEntity
+type ManagedEntity = RoomLight | RoomEntity | LightOffsetEntity
 
 # Registry changes that can move a light between rooms, change whether it
 # gets offset settings, or rename them.
@@ -48,7 +49,12 @@ REFRESH_FIELDS = frozenset(
 
 
 class RoomManager:
-    """Keep the room lights and offset settings in sync with the registries."""
+    """Keep the entities of all rooms in sync with the registries.
+
+    Each area with lights gets a room light, a schedule automation with its
+    switch and sensor, and each of its lights with color temperature gets
+    offset settings.
+    """
 
     def __init__(self, hass: HomeAssistant, entry: LightBuddyConfigEntry) -> None:
         """Initialize the manager."""
@@ -62,6 +68,8 @@ class RoomManager:
         self._light_rooms: dict[str, str] = {}
         self._offset_light_ids: set[str] = set()
         self._offset_entities: dict[str, list[LightOffsetEntity]] = {}
+        self._automations: dict[str, RoomAutomation] = {}
+        self._room_entities: dict[str, list[RoomEntity]] = {}
         self._debouncer = Debouncer(
             hass,
             _LOGGER,
@@ -74,6 +82,7 @@ class RoomManager:
     def async_setup(self) -> None:
         """Create the entities and listen for registry changes."""
         self.entry.async_on_unload(self._debouncer.async_shutdown)
+        self.entry.async_on_unload(self._async_stop_automations)
         for event_type, event_filter in (
             (er.EVENT_ENTITY_REGISTRY_UPDATED, _entity_event_filter),
             (dr.EVENT_DEVICE_REGISTRY_UPDATED, _device_event_filter),
@@ -128,7 +137,9 @@ class RoomManager:
         self._offset_light_ids = {entry.entity_id for entry in offset_lights.values()}
 
         self._async_remove_stale(entity_registry, rooms.keys(), offset_lights.keys())
+        self._async_refresh_automations(rooms.keys())
         self._async_refresh_lights(rooms, area_registry)
+        self._async_refresh_room_entities(rooms.keys(), area_registry)
         self._async_refresh_offset_entities(offset_lights)
 
     @callback
@@ -138,34 +149,55 @@ class RoomManager:
         area_ids: Collection[str],
         registry_ids: Collection[str],
     ) -> None:
-        from .number import ColorTempOffsetNumber
-        from .select import ColorTempOffsetUnitSelect
-
-        suffixes = {
-            cls.PLATFORM: cls.UNIQUE_ID_SUFFIX
-            for cls in (ColorTempOffsetNumber, ColorTempOffsetUnitSelect)
+        """Remove the entities of areas and lights that are gone."""
+        wanted = {
+            f"{area_id}{suffix}"
+            for area_id in area_ids
+            for suffix in (
+                "",
+                *(cls.UNIQUE_ID_SUFFIX for cls in _room_entity_classes()),
+            )
+        } | {
+            f"{registry_id}{cls.UNIQUE_ID_SUFFIX}"
+            for registry_id in registry_ids
+            for cls in _offset_entity_classes()
         }
         for registry_entry in er.async_entries_for_config_entry(
             entity_registry, self.entry.entry_id
         ):
-            unique_id = registry_entry.unique_id
-            if registry_entry.domain == LIGHT_DOMAIN:
-                if unique_id in area_ids:
-                    continue
-                self._lights.pop(unique_id, None)
-            elif (
-                unique_id.removesuffix(suffixes.get(registry_entry.domain, ""))
-                in registry_ids
-            ):
-                continue
-            entity_registry.async_remove(registry_entry.entity_id)
+            if registry_entry.unique_id not in wanted:
+                entity_registry.async_remove(registry_entry.entity_id)
 
+        # Removing from the registry removes added entities. Those never added,
+        # e.g. while disabled, are only dropped.
         for area_id in self._lights.keys() - area_ids:
             self._async_replace([self._lights.pop(area_id)], [], lambda: False)
+        for area_id in self._room_entities.keys() - area_ids:
+            self._async_replace(self._room_entities.pop(area_id), [], lambda: False)
         for registry_id in self._offset_entities.keys() - registry_ids:
             self._async_replace(
                 self._offset_entities.pop(registry_id), [], lambda: False
             )
+
+    @callback
+    def _async_refresh_automations(self, area_ids: Collection[str]) -> None:
+        for area_id in self._automations.keys() - area_ids:
+            self._automations.pop(area_id).async_stop()
+        for area_id in area_ids:
+            if area_id not in self._automations:
+                automation = RoomAutomation(
+                    self.hass,
+                    area_id,
+                    lambda area_id=area_id: self._lights.get(area_id),
+                )
+                self._automations[area_id] = automation
+                automation.async_start()
+
+    @callback
+    def _async_stop_automations(self) -> None:
+        for automation in self._automations.values():
+            automation.async_stop()
+        self._automations.clear()
 
     @callback
     def _async_refresh_lights(
@@ -180,7 +212,9 @@ class RoomManager:
             if light is not None and light.area_name == name:
                 light.async_set_members(members)
                 continue
-            new_light = RoomLight(area_id, name, members, self.offsets)
+            new_light = RoomLight(
+                area_id, name, members, self.offsets, self._automations[area_id]
+            )
             self._lights[area_id] = new_light
             if light is None:
                 new_lights.append(new_light)
@@ -197,12 +231,39 @@ class RoomManager:
         self._async_add(new_lights)
 
     @callback
+    def _async_refresh_room_entities(
+        self, area_ids: Collection[str], area_registry: ar.AreaRegistry
+    ) -> None:
+        new_entities: list[ManagedEntity] = []
+        for area_id in area_ids:
+            name = area_registry.async_get_area(area_id).name  # type: ignore[union-attr]
+            entities = self._room_entities.get(area_id)
+            if entities is not None and all(
+                entity.area_name == name for entity in entities
+            ):
+                continue
+            automation = self._automations[area_id]
+            new: list[RoomEntity] = [
+                cls(automation, name) for cls in _room_entity_classes()
+            ]
+            self._room_entities[area_id] = new
+            if entities is None:
+                new_entities.extend(new)
+            else:
+                # Names come from the area, see the room lights.
+                self._async_replace(
+                    entities,
+                    new,
+                    lambda area_id=area_id, new=new: (
+                        self._room_entities.get(area_id) is new
+                    ),
+                )
+        self._async_add(new_entities)
+
+    @callback
     def _async_refresh_offset_entities(
         self, offset_lights: dict[str, er.RegistryEntry]
     ) -> None:
-        from .number import ColorTempOffsetNumber
-        from .select import ColorTempOffsetUnitSelect
-
         device_registry = dr.async_get(self.hass)
         new_entities: list[ManagedEntity] = []
         for registry_id, light_entry in offset_lights.items():
@@ -225,7 +286,7 @@ class RoomManager:
                 continue
             new: list[LightOffsetEntity] = [
                 cls(self, light_entry, device, light_name)
-                for cls in (ColorTempOffsetNumber, ColorTempOffsetUnitSelect)
+                for cls in _offset_entity_classes()
             ]
             self._offset_entities[registry_id] = new
             if entities is None:
@@ -305,6 +366,23 @@ class RoomManager:
 
         if room is not None and requested is not None:
             await room.async_set_member_color_temp(entity_id, requested)
+
+
+def _room_entity_classes() -> tuple[type[RoomEntity], ...]:
+    """Return the entities each room gets next to its room light."""
+    # Imported here, as the platforms import this module.
+    from .sensor import TargetColorTempSensor
+    from .switch import ScheduleSwitch
+
+    return (ScheduleSwitch, TargetColorTempSensor)
+
+
+def _offset_entity_classes() -> tuple[type[LightOffsetEntity], ...]:
+    """Return the offset settings each light with color temperature gets."""
+    from .number import ColorTempOffsetNumber
+    from .select import ColorTempOffsetUnitSelect
+
+    return (ColorTempOffsetNumber, ColorTempOffsetUnitSelect)
 
 
 def _supports_color_temp(hass: HomeAssistant, entry: er.RegistryEntry) -> bool:

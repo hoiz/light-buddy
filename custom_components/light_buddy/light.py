@@ -60,8 +60,14 @@ from .const import (
     TRANSITION_GRACE_SECONDS,
 )
 from .manager import LightBuddyConfigEntry
-from .offset import ColorTempOffset, clamp, same_color_temp
-from .room import COLOR_GROUP_ATTRS, MemberParams, RoomCommander, turn_off_params
+from .offset import ColorTempOffset, same_color_temp
+from .room import (
+    COLOR_GROUP_ATTRS,
+    MemberParams,
+    RoomCommander,
+    reachable_kelvin,
+    turn_off_params,
+)
 from .schedule import Target
 
 _LOGGER = logging.getLogger(__name__)
@@ -120,6 +126,8 @@ class RoomLight(LightEntity):
         # Lights turning on before this loop time may still be turning off.
         self._turning_off_until = 0.0
         self._turned_off_at: dict[str, float] = {}
+        # Lights turned off by others with a transition, until when.
+        self._member_turning_off_until: dict[str, float] = {}
         self._unsub_members: CALLBACK_TYPE | None = None
         self._commander: RoomCommander | None = None
         self._attr_color_mode = ColorMode.ONOFF
@@ -179,6 +187,7 @@ class RoomLight(LightEntity):
 
     @callback
     def _async_member_changed(self, event: Event[EventStateChangedData]) -> None:
+        was_on = self._attr_is_on
         self._async_update_state()
         self.async_write_ha_state()
 
@@ -187,17 +196,31 @@ class RoomLight(LightEntity):
         if old_state is None or new_state is None:
             return
         automation = self._automation
-        if automation is not None and not self._attr_is_on:
+        commander = self._commander
+        if (
+            automation is not None
+            and commander is not None
+            and was_on
+            and not self._attr_is_on
+            # A turn on right after the turn off may already be on its way.
+            and not commander.turning_on
+        ):
             automation.async_room_off()
         now = self.hass.loop.time()
+        entity_id = new_state.entity_id
         if old_state.state == STATE_ON and new_state.state != STATE_ON:
-            self._turned_off_at[new_state.entity_id] = now
+            self._turned_off_at[entity_id] = now
+            if commander is not None:
+                commander.async_forget_sent([entity_id])
         elif (
             automation is not None
-            and self._commander is not None
+            and commander is not None
             and old_state.state == STATE_ON
             and new_state.state == STATE_ON
-            and not self._commander.is_own_context(new_state.context)
+            and not commander.is_own_context(new_state.context)
+            # Lights report their values while fading out, too.
+            and not self._turning_off(now)
+            and now >= self._member_turning_off_until.get(entity_id, 0)
             and (attributes := self._changed_elsewhere(new_state, now))
         ):
             automation.async_mark_manual(attributes)
@@ -230,14 +253,13 @@ class RoomLight(LightEntity):
             return set()
         attributes = state.attributes
         changed = set()
-        if (sent_kelvin := params.get(ATTR_COLOR_TEMP_KELVIN)) is not None:
+        if (
+            sent_kelvin := params.get(ATTR_COLOR_TEMP_KELVIN)
+        ) is not None and ColorMode.COLOR_TEMP in (
+            attributes.get(ATTR_SUPPORTED_COLOR_MODES) or ()
+        ):
             kelvin = attributes.get(ATTR_COLOR_TEMP_KELVIN)
-            # What the light can show of what was sent.
-            sent_kelvin = clamp(
-                sent_kelvin,
-                attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
-                attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
-            )
+            sent_kelvin = reachable_kelvin(sent_kelvin, attributes)
             if (
                 attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP
                 or kelvin is None
@@ -250,6 +272,19 @@ class RoomLight(LightEntity):
         ):
             changed.add(PAUSE_BRIGHTNESS)
         return changed
+
+    @callback
+    def async_member_turning_off(self, entity_id: str, transition: float) -> None:
+        """Note a light that others turn off, which may fade out for a while."""
+        self._member_turning_off_until[entity_id] = (
+            self.hass.loop.time() + transition + TRANSITION_GRACE_SECONDS
+        )
+
+    @callback
+    def async_forget_sent(self) -> None:
+        """Forget what was sent to the lights, e.g. once a pause ends."""
+        if self._commander is not None:
+            self._commander.async_forget_sent(self._members)
 
     def is_own_context(self, context: Context) -> bool:
         """Return True if a context belongs to a command of this room."""
@@ -352,10 +387,9 @@ class RoomLight(LightEntity):
                 and (current := attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None
             ):
                 offset = self._offsets.get(entity_id)
-                reachable = clamp(
+                reachable = reachable_kelvin(
                     offset.apply(target.kelvin) if offset else target.kelvin,
-                    attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
-                    attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
+                    attributes,
                 )
                 if abs(current - reachable) >= threshold:
                     params[ATTR_COLOR_TEMP_KELVIN] = target.kelvin

@@ -47,6 +47,15 @@ OWN_CONTEXTS = 50
 type MemberParams = dict[str, dict[str, Any]]
 
 
+def reachable_kelvin(kelvin: float, attributes: Mapping[str, Any]) -> int:
+    """Return what a light can show of a color temperature, within its range."""
+    return clamp(
+        kelvin,
+        attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
+        attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
+    )
+
+
 @callback
 def async_split_turn_on(
     hass: HomeAssistant,
@@ -68,11 +77,9 @@ def async_split_turn_on(
             ATTR_COLOR_TEMP_KELVIN in params
             and (offset := offsets.get(entity_id)) is not None
         ):
-            attributes = state.attributes if state is not None else {}
-            params[ATTR_COLOR_TEMP_KELVIN] = clamp(
+            params[ATTR_COLOR_TEMP_KELVIN] = reachable_kelvin(
                 offset.apply(params[ATTR_COLOR_TEMP_KELVIN]),
-                attributes.get(ATTR_MIN_COLOR_TEMP_KELVIN),
-                attributes.get(ATTR_MAX_COLOR_TEMP_KELVIN),
+                state.attributes if state is not None else {},
             )
         if state is not None:
             if not color_supported(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)):
@@ -122,12 +129,23 @@ class RoomCommander:
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
         self._own_context_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
-        # When each light last got a turn on, and its params, to tell later
-        # changes made elsewhere.
+        # When each light last got a turn on, and the last values sent per
+        # attribute, to tell later changes made elsewhere.
         self.last_sent: dict[str, tuple[float, dict[str, Any]]] = {}
         self._next_allowed = 0.0
         self._pending: tuple[str, MemberParams, Context | None] | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
+
+    @property
+    def turning_on(self) -> bool:
+        """Return True if a turn on waits to be sent."""
+        return self._pending is not None and self._pending[0] == SERVICE_TURN_ON
+
+    @callback
+    def async_forget_sent(self, entity_ids: Iterable[str]) -> None:
+        """Forget what was sent, so later changes are not compared with it."""
+        for entity_id in entity_ids:
+            self.last_sent.pop(entity_id, None)
 
     @property
     def turning_off(self) -> bool:
@@ -255,7 +273,17 @@ class RoomCommander:
             if service == SERVICE_TURN_ON:
                 sent_at = self.hass.loop.time()
                 for entity_id in entity_ids:
-                    self.last_sent[entity_id] = (sent_at, call_params)
+                    # A call with some attributes keeps what was sent of others.
+                    _, older = self.last_sent.get(entity_id, (0, {}))
+                    older = {
+                        key: value
+                        for key, value in older.items()
+                        if key != ATTR_TRANSITION
+                    }
+                    self.last_sent[entity_id] = (
+                        sent_at,
+                        merge_params(older, call_params),
+                    )
             if ATTR_COLOR_TEMP_KELVIN in call_params:
                 for entity_id in entity_ids:
                     self.sent_color_temps[entity_id] = (

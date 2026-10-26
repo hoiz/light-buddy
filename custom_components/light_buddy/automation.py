@@ -9,7 +9,14 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.light import ATTR_BRIGHTNESS
+from homeassistant.components.light import (
+    ATTR_BRIGHTNESS,
+    ATTR_BRIGHTNESS_PCT,
+    ATTR_BRIGHTNESS_STEP,
+    ATTR_BRIGHTNESS_STEP_PCT,
+    ATTR_COLOR_NAME,
+    ATTR_PROFILE,
+)
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.sun import get_astral_event_date
@@ -36,15 +43,28 @@ _LOGGER = logging.getLogger(__name__)
 TURNED_ON_DEBOUNCE_SECONDS = 0.3
 
 
+# Also the forms of service calls, before Home Assistant converts them.
+BRIGHTNESS_PARAMS = frozenset(
+    {
+        ATTR_BRIGHTNESS,
+        ATTR_BRIGHTNESS_PCT,
+        ATTR_BRIGHTNESS_STEP,
+        ATTR_BRIGHTNESS_STEP_PCT,
+        ATTR_PROFILE,
+    }
+)
+COLOR_PARAMS = COLOR_GROUP_ATTRS | {ATTR_COLOR_NAME, ATTR_PROFILE}
+
+
 def manual_attributes(params: Mapping[str, Any]) -> set[str]:
     """Return what a turn on with these params sets on purpose.
 
     Colors count as color temperature, since they take its place.
     """
     attributes = set()
-    if ATTR_BRIGHTNESS in params:
+    if not BRIGHTNESS_PARAMS.isdisjoint(params):
         attributes.add(PAUSE_BRIGHTNESS)
-    if not COLOR_GROUP_ATTRS.isdisjoint(params):
+    if not COLOR_PARAMS.isdisjoint(params):
         attributes.add(PAUSE_COLOR_TEMP)
     return attributes
 
@@ -190,6 +210,10 @@ class RoomAutomation:
     @callback
     def _async_clear_pause(self) -> None:
         self._async_cancel_auto_resume()
+        # Lights left as someone set them would otherwise count as changed
+        # again, compared with what was sent before the pause.
+        if (light := self.light) is not None:
+            light.async_forget_sent()
         if self.paused:
             self.paused.clear()
             self.paused_since = None

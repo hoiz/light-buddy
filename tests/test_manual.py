@@ -266,3 +266,192 @@ async def test_resume_button(hass: HomeAssistant, add_light, setup_integration) 
         }
     ]
     assert hass.states.get(RESUME).name == "Resume schedule Wohnzimmer"
+
+
+def _age_last_sent(hass: HomeAssistant, lamp: str) -> None:
+    """Pretend the last command to a light was sent a while ago."""
+    commander = _room(hass)._commander
+    sent_at, params = commander.last_sent[lamp]
+    commander.last_sent[lamp] = (sent_at - 10, params)
+
+
+async def test_brightness_pct_by_others(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Calls with brightness_pct, as automations use it, are respected."""
+    automation, _ = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+
+    await hass.services.async_call(
+        "light",
+        "turn_on",
+        {"entity_id": "light.lamp", "brightness_pct": 30},
+        blocking=True,
+    )
+    assert automation.paused == {"brightness"}
+
+
+async def test_toggle_turning_off_is_not_manual(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A toggle with values that turns a light off pauses nothing."""
+    automation, _ = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "toggle")
+
+    await hass.services.async_call(
+        "light", "toggle", {"entity_id": "light.lamp", "brightness": 30}, blocking=True
+    )
+    assert automation.paused == set()
+
+
+async def test_values_sent_earlier_are_kept(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A command with brightness only keeps the color temperature sent before."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+    await automation.async_resume()
+    # The light shows the target, then only the brightness of the curve moves.
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 128), context=Context())
+    automation.async_set_points(
+        (
+            SchedulePoint(4000, dt.time(0, 0), brightness=80),
+            SchedulePoint(4000, dt.time(12, 0), brightness=80),
+        )
+    )
+    await _room(hass).async_apply_target(automation.target, 2, threshold=50)
+    assert _room(hass)._commander.last_sent[lamp][1]["color_temp_kelvin"] == 4000
+
+    _age_last_sent(hass, lamp)
+    hass.states.async_set(lamp, STATE_ON, _on(2700, 204), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == {"color_temp"}
+
+
+async def test_resume_does_not_pause_again(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """After resuming, a light left in a color does not pause the room again."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+    await automation.async_resume()
+    _age_last_sent(hass, lamp)
+    red = {**WIDE_LIGHT, "color_mode": ColorMode.XY, "brightness": 128}
+    hass.states.async_set(lamp, STATE_ON, red, context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == {"color_temp"}
+
+    await automation.async_resume()
+    hass.states.async_set(lamp, STATE_ON, {**red, "brightness": 129}, context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == set()
+
+
+async def test_light_off_forgets_what_was_sent(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """After a light was off, its old values are not compared any more."""
+    automation, lamps = await _setup_room(hass, add_light, setup_integration, "a", "b")
+    async_mock_service(hass, "light", "turn_on")
+    await automation.async_resume()
+
+    hass.states.async_set(lamps[0], STATE_OFF, WIDE_LIGHT)
+    await hass.async_block_till_done()
+    assert lamps[0] not in _room(hass)._commander.last_sent
+
+
+async def test_lights_without_color_temp(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Lights that cannot show a color temperature never pause it."""
+    automation, _ = await _setup_room(hass, add_light, setup_integration, "lamp")
+    dimmer = add_light(
+        "dimmer",
+        area="Wohnzimmer",
+        state=STATE_ON,
+        attributes={
+            "supported_color_modes": [ColorMode.BRIGHTNESS],
+            "color_mode": ColorMode.BRIGHTNESS,
+            "brightness": 100,
+        },
+    )
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    async_mock_service(hass, "light", "turn_on")
+    # A color temperature for the whole room reaches the dimmer, too.
+    await _room(hass)._commander.async_send_now(
+        {dimmer: {"color_temp_kelvin": 3000, "brightness": 100}}
+    )
+    _age_last_sent(hass, dimmer)
+
+    hass.states.async_set(
+        dimmer,
+        STATE_ON,
+        {
+            "supported_color_modes": [ColorMode.BRIGHTNESS],
+            "color_mode": ColorMode.BRIGHTNESS,
+            "brightness": 101,
+        },
+        context=Context(),
+    )
+    await hass.async_block_till_done()
+    assert automation.paused == set()
+
+
+async def test_fading_out_is_not_manual(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Brightness reported while a light fades out is not dimming by hand."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    await automation.async_resume()
+    _age_last_sent(hass, lamp)
+
+    await hass.services.async_call(
+        "light", "turn_off", {"entity_id": lamp, "transition": 10}, blocking=True
+    )
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 30), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == set()
+
+
+async def test_quick_off_and_on_keeps_pause(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A dimmed turn on right after turning off stays paused."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    room = _room(hass)
+
+    await room.async_turn_off()
+    # Within the command interval, so the turn on waits.
+    await room.async_turn_on(brightness=50)
+    hass.states.async_set(lamp, STATE_OFF, WIDE_LIGHT)
+    await hass.async_block_till_done()
+    assert automation.paused == {"brightness"}
+
+
+async def test_auto_resume(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With a timeout, the pause ends by itself and the target is applied."""
+    monkeypatch.setattr("custom_components.light_buddy.automation.AUTO_RESUME", 600)
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    hass.states.async_set(lamp, STATE_ON, _on(2700, 30))
+    await hass.async_block_till_done()
+    automation.async_mark_manual({"color_temp"})
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=601))
+    await hass.async_block_till_done()
+    assert automation.paused == set()
+    assert calls[-1].data["color_temp_kelvin"] == 4000

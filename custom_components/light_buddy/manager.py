@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.light import (
     ATTR_SUPPORTED_COLOR_MODES,
+    ATTR_TRANSITION,
     DOMAIN as LIGHT_DOMAIN,
     color_temp_supported,
 )
@@ -18,7 +19,9 @@ from homeassistant.const import (
     ATTR_SERVICE_DATA,
     EVENT_CALL_SERVICE,
     SERVICE_TOGGLE,
+    SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
+    STATE_ON,
     Platform,
 )
 from homeassistant.core import Event, HomeAssistant, callback
@@ -121,28 +124,46 @@ class RoomManager:
 
     @callback
     def _async_light_service_called(self, event: Event[Mapping[str, Any]]) -> None:
-        """Pause what others set on purpose on the lights of a room.
+        """Note what others do to the lights of a room.
 
-        Covers lights controlled directly, by automations, and by scenes,
-        which apply their states through light.turn_on as well.
+        Values set on purpose are paused, for lights controlled directly, by
+        automations, and by scenes, which apply their states through
+        light.turn_on as well. Lights turned off with a transition fade out,
+        which is not a change by hand.
         """
+        service = event.data[ATTR_SERVICE]
         service_data = event.data[ATTR_SERVICE_DATA]
-        if not (attributes := manual_attributes(service_data)):
+        attributes = manual_attributes(service_data)
+        if service != SERVICE_TURN_OFF and not attributes:
             return
         # Groups are not expanded: a call to a room light is handled by it.
         selected = async_extract_referenced_entity_ids(
             self.hass, TargetSelection(service_data), expand_group=False
         )
-        area_ids = {
-            area_id
+        entity_ids = [
+            entity_id
             for entity_id in selected.referenced | selected.indirectly_referenced
-            if (area_id := self._light_rooms.get(entity_id)) is not None
-        }
-        for area_id in area_ids:
+            if entity_id in self._light_rooms
+        ]
+        if service == SERVICE_TOGGLE:
+            # Only lights that the toggle turns on get the values.
+            entity_ids = [
+                entity_id
+                for entity_id in entity_ids
+                if (state := self.hass.states.get(entity_id)) is None
+                or state.state != STATE_ON
+            ]
+        for entity_id in entity_ids:
+            area_id = self._light_rooms[entity_id]
             light = self._lights.get(area_id)
             if light is not None and light.is_own_context(event.context):
                 continue
-            if (automation := self._automations.get(area_id)) is not None:
+            if service == SERVICE_TURN_OFF:
+                if light is not None:
+                    light.async_member_turning_off(
+                        entity_id, service_data.get(ATTR_TRANSITION, 0)
+                    )
+            elif (automation := self._automations.get(area_id)) is not None:
                 automation.async_mark_manual(attributes)
 
     @callback
@@ -472,10 +493,11 @@ def _entity_event_filter(event_data: er.EventEntityRegistryUpdatedData) -> bool:
 
 @callback
 def _light_service_filter(event_data: Mapping[str, Any]) -> bool:
-    """Only calls that turn lights on can set something on purpose."""
+    """Only calls that turn lights on or off matter."""
     return event_data[ATTR_DOMAIN] == LIGHT_DOMAIN and event_data[ATTR_SERVICE] in (
         SERVICE_TURN_ON,
         SERVICE_TOGGLE,
+        SERVICE_TURN_OFF,
     )
 
 

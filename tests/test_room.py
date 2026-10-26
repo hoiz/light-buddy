@@ -210,3 +210,23 @@ async def test_no_waiting_task_without_lights(
             {ikea: {"brightness": 100, "color_temp_kelvin": 3000}}
         )
     assert commander._later == {}
+
+
+async def test_wall_switch_in_color_context_stays_off(
+    hass: HomeAssistant, add_light, setup_integration, freezer
+) -> None:
+    """Lights keep the color's context a while, which is no turn off of ours."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    calls = async_mock_service(hass, "light", "turn_on")
+    commander = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")._commander
+
+    await commander.async_send_now(
+        {ikea: {"brightness": 100, "color_temp_kelvin": 3000}}
+    )
+    color_context = calls[0].context
+    freezer.tick(0.1)
+    hass.states.async_set(ikea, STATE_ON, COLOR_LIGHT, context=color_context)
+    hass.states.async_set(ikea, STATE_OFF, COLOR_LIGHT, context=color_context)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert len(calls) == 1

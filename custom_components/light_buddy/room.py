@@ -213,6 +213,7 @@ class RoomCommander:
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
         self._own_context_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
+        self._own_turn_off_ids: deque[str] = deque(maxlen=OWN_CONTEXTS)
         # The last color temperature and brightness each light got, to tell
         # later changes made elsewhere.
         self.last_sent: dict[str, dict[str, SentValue]] = {}
@@ -353,6 +354,8 @@ class RoomCommander:
         if context is None:
             context = Context()
         self._own_context_ids.append(context.id)
+        if service == SERVICE_TURN_OFF:
+            self._own_turn_off_ids.append(context.id)
         # A newer brightness, or a turn off, replaces brightness still waiting
         # for the same lights. Other lights of that command keep waiting.
         replaced = {
@@ -433,7 +436,8 @@ class RoomCommander:
         for entity_ids, call_params in waiting.calls:
             # Lights turned off by others since the color was sent, e.g. by a
             # wall switch, stay off. Lights that did not report on yet still
-            # get it, as do lights reporting the end of our own turn off.
+            # get it, as do lights reporting the end of our own turn off. Not
+            # any context of ours: lights keep that of the color a while.
             if send := [
                 entity_id
                 for entity_id in entity_ids
@@ -442,7 +446,7 @@ class RoomCommander:
                     (state := self.hass.states.get(entity_id)) is not None
                     and state.state != STATE_ON
                     and state.last_changed >= waiting.sent_at
-                    and not self.is_own_context(state.context)
+                    and state.context.id not in self._own_turn_off_ids
                 )
             ]:
                 await self._async_call(

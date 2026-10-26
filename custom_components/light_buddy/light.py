@@ -231,7 +231,11 @@ class RoomLight(LightEntity):
             and now >= self._member_turning_off_until.get(entity_id, 0)
             and (attributes := self._changed_elsewhere(new_state, now))
         ):
-            automation.async_mark_manual(attributes, command=False)
+            # A new change starts the automatic resume over, a light only
+            # reporting the same difference again does not.
+            automation.async_mark_manual(
+                attributes, command=_changed(old_state, new_state)
+            )
         elif (
             self._automation is not None
             and self._commander is not None
@@ -575,6 +579,26 @@ class RoomLight(LightEntity):
         await self._commander.async_send_now(
             {entity_id: {ATTR_COLOR_TEMP_KELVIN: round(kelvin)}}
         )
+
+
+def _changed(old_state: State, new_state: State) -> bool:
+    """Return True if a light changed noticeably between two reports."""
+    old, new = old_state.attributes, new_state.attributes
+    if old.get(ATTR_COLOR_MODE) != new.get(ATTR_COLOR_MODE):
+        return True
+    old_kelvin = old.get(ATTR_COLOR_TEMP_KELVIN)
+    new_kelvin = new.get(ATTR_COLOR_TEMP_KELVIN)
+    if (old_kelvin is None) != (new_kelvin is None) or (
+        old_kelvin is not None
+        and abs(new_kelvin - old_kelvin) >= MANUAL_COLOR_TEMP_THRESHOLD_KELVIN
+    ):
+        return True
+    old_brightness = old.get(ATTR_BRIGHTNESS)
+    new_brightness = new.get(ATTR_BRIGHTNESS)
+    return (old_brightness is None) != (new_brightness is None) or (
+        old_brightness is not None
+        and abs(new_brightness - old_brightness) >= MANUAL_BRIGHTNESS_THRESHOLD
+    )
 
 
 def _target_params(

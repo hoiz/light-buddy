@@ -49,6 +49,8 @@ _LOGGER = logging.getLogger(__name__)
 TURNED_ON_DEBOUNCE_SECONDS = 0.3
 # A pause this recent is not ended by a room that looks off.
 RECENT_PAUSE_SECONDS = 10
+# Applying the schedule gives up after this, before the next tick is due.
+APPLY_TIMEOUT_SECONDS = 55
 
 
 # Also the forms of service calls, before Home Assistant converts them.
@@ -136,6 +138,8 @@ class RoomAutomation:
         # Applying the schedule, by ticks and otherwise.
         self._tasks: set[asyncio.Task[None]] = set()
         self._tick: asyncio.Task[None] | None = None
+        # Applies run one after another, so their commands do not interleave.
+        self._apply_lock = asyncio.Lock()
         self.points: tuple[SchedulePoint, ...] = DEFAULT_SCHEDULE
         self.settings = ScheduleSettings()
         self.target: Target | None = None
@@ -180,7 +184,7 @@ class RoomAutomation:
                     self.hass, self._async_tick_later, SCHEDULE_INTERVAL
                 )
             )
-            self._async_track(self._async_tick(dt_util.utcnow()))
+            self._tick = self._async_track(self._async_tick(dt_util.utcnow()))
 
         self._unsubs.append(async_call_later(self.hass, offset, _async_start_interval))
 
@@ -360,16 +364,22 @@ class RoomAutomation:
         transition: float | None = None,
         members: list[str] | None = None,
     ) -> None:
-        if self.active and (light := self.light) is not None:
+        async with self._apply_lock:
+            if not self.active or (light := self.light) is None:
+                return
             assert self.target is not None
             try:
-                await light.async_apply_target(
-                    self.target,
-                    self.settings.transition if transition is None else transition,
-                    members=members,
-                    threshold=self.settings.threshold,
-                    paused=frozenset(self.paused),
-                )
+                # A light that never answers must not hold up the schedule.
+                async with asyncio.timeout(APPLY_TIMEOUT_SECONDS):
+                    await light.async_apply_target(
+                        self.target,
+                        self.settings.transition if transition is None else transition,
+                        members=members,
+                        threshold=self.settings.threshold,
+                        paused=frozenset(self.paused),
+                    )
+            except TimeoutError:
+                _LOGGER.warning("Lights in %s did not answer in time", self.area_id)
             except Exception:
                 # Failed calls are logged per light, the next tick tries again.
                 _LOGGER.debug("Applying the schedule in %s failed", self.area_id)

@@ -1,5 +1,6 @@
 """Tests for respecting manual changes."""
 
+import asyncio
 import dataclasses
 import datetime as dt
 from datetime import timedelta
@@ -630,3 +631,58 @@ async def test_slow_tick_skips_next(
     assert automation._tasks == tasks
     running.set_result(None)
     await hass.async_block_till_done()
+
+
+async def test_new_remote_change_restarts_resume(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Dimming again with a remote starts the automatic resume over."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+    await automation.async_resume()
+    _age_last_sent(hass, lamp)
+
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 60), context=Context())
+    await hass.async_block_till_done()
+    assert automation.paused == {"brightness"}
+    automation._paused_at -= 100
+    paused_at = automation._paused_at
+
+    # The same report again does not count as a new change, a new one does.
+    hass.states.async_set(
+        lamp, STATE_ON, {**_on(4000, 60), "friendly_name": "x"}, context=Context()
+    )
+    await hass.async_block_till_done()
+    assert automation._paused_at == paused_at
+    hass.states.async_set(lamp, STATE_ON, _on(4000, 200), context=Context())
+    await hass.async_block_till_done()
+    assert automation._paused_at > paused_at
+
+
+async def test_lights_not_answering_do_not_block(
+    hass: HomeAssistant, add_light, setup_integration, monkeypatch
+) -> None:
+    """A light that never answers gives up the apply, the next one runs."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    monkeypatch.setattr(
+        "custom_components.light_buddy.automation.APPLY_TIMEOUT_SECONDS", 0.05
+    )
+    hang = hass.loop.create_future()
+
+    async def never_answers(call) -> None:
+        await hang
+
+    hass.services.async_register("light", "turn_on", never_answers)
+    hass.states.async_set(lamp, STATE_ON, _on(3000, 20))
+    await hass.async_block_till_done()
+
+    # Time is frozen in these tests, so the timeout is moved on by hand.
+    resume = hass.async_create_task(automation.async_resume())
+    await asyncio.sleep(0)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await asyncio.wait_for(resume, 5)
+    assert not automation._apply_lock.locked()
+    # Giving up cancelled the call that never answered.
+    assert hang.cancelled()

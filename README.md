@@ -1,67 +1,71 @@
+<p align="center">
+  <img src="custom_components/light_buddy/brand/icon@2x.png" alt="Light Buddy" width="128">
+</p>
+
 # Light Buddy
 
-Custom Integration für Home Assistant: **ein Licht pro Raum**, ohne Lichtgruppen pflegen zu müssen.
+A custom integration for Home Assistant: **one light per room**, without maintaining light groups.
 
-Für jeden Bereich (Area) mit mindestens einer Lampe legt Light Buddy eine Licht-Entität an, z. B. `light.all_wohnzimmer` mit dem Namen „Alle Lichter in Wohnzimmer“ (auf Englisch „All lights in Wohnzimmer“). Sie schaltet und dimmt alle Lampen des Bereichs gemeinsam und funktioniert in einer normalen Dashboard-Kachel mit Helligkeitsregler.
+For every area with at least one light, Light Buddy creates a light entity, e.g. `light.all_living` named "All lights in Living". It switches and dims all lights of the area together and works in a regular dashboard tile with a brightness slider.
 
-Dazu kommen ein Farbtemperatur-Offset pro Lampe und ein Zeitplan für die Farbtemperatur. Geplant: Disco-Modus.
+On top of that, there is a color temperature offset per light and a color temperature schedule. Planned: a disco mode.
 
-## Voraussetzungen
+## Requirements
 
-Home Assistant 2026.10 oder neuer.
+Home Assistant 2026.10 or newer.
 
 ## Installation
 
-**HACS:** HACS → Integrationen → Menü → Benutzerdefinierte Repositories → URL dieses Repositorys mit Typ „Integration“ hinzufügen. Danach „Light Buddy“ installieren und Home Assistant neu starten.
+**HACS:** HACS → Integrations → menu → Custom repositories → add the URL of this repository with the type "Integration". Then install "Light Buddy" and restart Home Assistant.
 
-**Manuell:** Den Ordner `custom_components/light_buddy` in den Ordner `custom_components` deiner Home-Assistant-Konfiguration kopieren und Home Assistant neu starten.
+**Manually:** Copy the folder `custom_components/light_buddy` into the `custom_components` folder of your Home Assistant configuration and restart Home Assistant.
 
-## Einrichtung
+## Setup
 
-Einstellungen → Geräte & Dienste → Integration hinzufügen → **Light Buddy**. Es gibt nichts weiter einzustellen; die Räume entstehen automatisch.
+Settings → Devices & services → Add integration → **Light Buddy**. There is nothing else to set up; the rooms are created automatically.
 
-## Welche Lampen gehören zu einem Raum?
+## Which lights belong to a room?
 
-- Lampen, deren Entität dem Bereich zugeordnet ist.
-- Lampen ohne eigenen Bereich, deren Gerät im Bereich liegt.
-- Nicht dabei sind deaktivierte Entitäten, Lichtgruppen (`group`) und die Light-Buddy-Entitäten selbst.
+- Lights whose entity is assigned to the area.
+- Lights without an area of their own whose device is in the area.
+- Not included: disabled entities, light groups (`group`) and Light Buddy's own entities.
 
-Wenn du eine Lampe verschiebst, einen Bereich anlegst oder umbenennst, passt sich Light Buddy ohne Neustart an. Bereiche ohne Lampen verlieren ihr Raum-Licht.
+When you move a light, or add or rename an area, Light Buddy follows without a restart. Areas without lights lose their room light.
 
-## Optionen
+## Options
 
-Einstellungen → Geräte & Dienste → Light Buddy → **Konfigurieren**:
+Settings → Devices & services → Light Buddy → **Configure** → **Rooms**:
 
-- **Ausgeschlossene Bereiche**: Für diese Bereiche gibt es kein Raum-Licht.
-- **Ausgeschlossene Lampen**: Diese Lampen gehören zu keinem Raum, z. B. Template-Lichter, die selbst andere Lampen steuern.
+- **Excluded areas**: these areas get no room light.
+- **Excluded lights**: these lights belong to no room, e.g. template lights that control other lights themselves.
 
-## Farbtemperatur-Offset
+## Color temperature offset
 
-Für eine Lampe, die kälter oder wärmer wirkt als die anderen. Jede Lampe mit Farbtemperatur in einem Raum hat auf ihrer Geräteseite unter **Konfiguration** zwei Einstellungen:
+For a light that looks colder or warmer than the others. Every light with color temperature in a room has two settings on its device page, under **Configuration**:
 
-- **Farbtemperatur-Offset**: Schieberegler für den Offset.
-- **Einheit Farbtemperatur-Offset**: Kelvin oder Mired. Beim Umschalten wird der Offset so umgerechnet, dass die Lampe bei 3000 K gleich aussieht.
+- **Color temperature offset**: a slider for the offset.
+- **Color temperature offset unit**: Kelvin or mired. Switching converts the offset so the light looks the same at 3000 K.
 
-**Kelvin oder Mired?** Ein Kelvin-Offset wirkt bei warmem Licht stark und bei kaltem kaum: -300 K sind bei 2700 K deutlich, bei 6000 K fast unsichtbar. Ein Mired-Offset wirkt überall gleich stark, so wie das Auge Farbtemperatur wahrnimmt. In Kelvin macht ein negativer Wert die Lampe wärmer, in Mired ein positiver.
+**Kelvin or mired?** A Kelvin offset is strong in warm light and barely noticeable in cold light: -300 K is clearly visible at 2700 K and almost invisible at 6000 K. A mired offset looks equally strong everywhere, matching how the eye perceives color temperature. In Kelvin, a negative value makes the light warmer; in mired, a positive one does.
 
-**Ausprobieren:** Schalte den Raum ein. Jede Änderung am Schieberegler wirkt sofort auf die Lampe.
+**Try it out:** Turn the room on. Every change of the slider applies to the light right away.
 
-1. Raum auf einen warmen Wert stellen, z. B. 2700 K, und den Offset anpassen, bis die Lampe zu den anderen passt.
-2. Raum auf einen kalten Wert stellen, z. B. 5000 K. Passt die Lampe noch, ist die Einheit richtig. Sonst die Einheit umschalten und wiederholen.
+1. Set the room to a warm value, e.g. 2700 K, and adjust the offset until the light matches the others.
+2. Set the room to a cold value, e.g. 5000 K. If the light still matches, the unit is right. Otherwise switch the unit and repeat.
 
-Weitere Hinweise:
+More notes:
 
-- Der Offset wirkt nur, wenn die Farbtemperatur über ein Raum-Licht gesetzt wird. Steuerst du die Lampe direkt, bekommt sie den Wert ohne Offset.
-- Der Zielwert wird auf den Bereich der Lampe begrenzt.
-- Das Raum-Licht zeigt den gewünschten Wert an, nicht den verschobenen.
-- Die Einstellungen erscheinen nicht auf Dashboards und werden von Bereichs-Aktionen nicht erfasst.
-- Lampen, die nur Farben können, haben keinen Offset.
+- The offset only applies when the color temperature is set through a room light. Controlling the light directly gives it the value without the offset.
+- The resulting value is limited to the light's range.
+- The room light shows the requested value, not the shifted one.
+- The settings do not show up on dashboards and are not affected by area actions.
+- Lights that only support colors have no offset.
 
-## Zeitplan
+## Schedule
 
-Jeder Raum folgt einem Zeitplan für die Farbtemperatur. Zwischen den Zeitpunkten wird gleitend übergeblendet, auch über Mitternacht. Die Kurve folgt dem Tageslicht und ist mittags am kältesten:
+Every room follows a color temperature schedule. Between the points, the color temperature changes gradually, also across midnight. The default curve follows daylight and is coldest at noon:
 
-| Uhrzeit | Farbtemperatur |
+| Time | Color temperature |
 |---|---|
 | 05:30 | 2200 K |
 | 06:30 | 3000 K |
@@ -72,73 +76,75 @@ Jeder Raum folgt einem Zeitplan für die Farbtemperatur. Zwischen den Zeitpunkte
 | 21:00 | 2700 K |
 | 22:30 | 2200 K |
 
-Pro Raum gibt es:
+Every room has:
 
-- **Zeitplan** (`switch.schedule_<bereich>`): schaltet den Zeitplan für den Raum ein oder aus. Der Zustand bleibt auch über Neustarts erhalten.
-- **Ziel-Farbtemperatur** (`sensor.target_color_temperature_<bereich>`): der aktuelle Zielwert, z. B. für eigene Automationen.
+- **Schedule** (`switch.schedule_<area>`): turns the schedule on or off for the room. The state is kept across restarts.
+- **Target color temperature** (`sensor.target_color_temperature_<area>`): the current target, e.g. for your own automations.
+- **Resume schedule** (`button.resume_schedule_<area>`): see "Manual changes".
 
-So verhält sich der Zeitplan:
+How the schedule behaves:
 
-- **Einschalten über das Raum-Licht:** Ausgeschaltete Lampen gehen direkt mit dem Zielwert an, ohne vorher die alte Farbe zu zeigen. Mit einer eigenen Farbe oder Farbtemperatur (z. B. aus einer Szene) bleibt sie unverändert, siehe „Manuelle Änderungen“.
-- **Einschalten an der Lampe selbst oder per Wandschalter:** Die Lampe bekommt den Zielwert innerhalb von etwa einer Sekunde.
-- **Laufende Anpassung:** Jede Minute bekommen eingeschaltete Lampen den Zielwert mit einem kurzen Übergang von 2 s. Gesendet wird nur, wenn die Lampe mindestens 50 K davon entfernt ist. Die Räume sind dabei über die Minute verteilt.
-- **Farbige Lampen:** Lampen, die gerade eine Farbe zeigen, lässt der Zeitplan in Ruhe.
-- **Helligkeit:** Der Zeitplan ändert nur die Farbtemperatur. Die Helligkeit bestimmst du.
-- **Offsets:** Farbtemperatur-Offsets gelten auch für den Zeitplan.
+- **Turning on through the room light:** lights that are off turn on with the target right away, without showing their old color first. With a color or color temperature of its own (e.g. from a scene), that one is kept; see "Manual changes".
+- **Turning on at the light itself or with a wall switch:** the light gets the target within about a second.
+- **Ongoing updates:** every minute, lights that are on get the target with a short 2 s transition. A command is only sent if the light is at least 50 K away from it. The rooms are spread across the minute.
+- **Colored lights:** lights that currently show a color are left alone.
+- **Brightness:** the schedule only changes the color temperature. The brightness is up to you.
+- **Offsets:** color temperature offsets apply to the schedule, too.
 
-## Zeitplan bearbeiten
+## Editing the schedule
 
-Einstellungen → Geräte & Dienste → Light Buddy → **Konfigurieren** → **Zeitplan**. Der Zeitplan gilt für alle Räume.
+Settings → Devices & services → Light Buddy → **Configure** → **Schedule**. The schedule applies to all rooms.
 
-- Die Übersicht zeigt alle Punkte als Tabelle.
-- **Punkt hinzufügen** / **Punkt bearbeiten**: Uhrzeit, Farbtemperatur und optional Wochentage. Ohne Wochentage gilt ein Punkt jeden Tag, so lässt sich z. B. am Wochenende ein späterer Morgen einstellen.
-- **Punkte löschen**: Mindestens ein Punkt muss bleiben.
-- **Auf Standard zurücksetzen**: die Tageslichtkurve von oben.
-- **Speichern** übernimmt alle Änderungen. Sie gelten sofort, ohne Neustart; laufende Pausen bleiben bestehen.
+- The overview shows all points as a table.
+- **Add point** / **Edit point**: time, color temperature and optional weekdays. Without weekdays, a point applies every day; with them you can, for example, set a later morning on weekends.
+- **Delete points**: at least one point has to stay.
+- **Reset to default**: the daylight curve from above.
+- **Save** stores all changes. They apply right away, without a restart; running pauses continue.
 
-Zwischen zwei Punkten ändert sich die Farbtemperatur gleichmäßig in Mired, so wie das Auge Farbtemperatur wahrnimmt.
+Between two points, the color temperature changes evenly in mired, matching how the eye perceives color temperature.
 
-## Einstellungen
+## Settings
 
-Light Buddy → **Konfigurieren** → **Einstellungen**:
+Light Buddy → **Configure** → **Settings**:
 
-| Einstellung | Standard | Bedeutung |
+| Setting | Default | Meaning |
 |---|---|---|
-| Kleinste Änderung | 50 K | Eingeschaltete Lampen bekommen erst eine neue Farbtemperatur, wenn der Zielwert mindestens so weit abweicht. |
-| Übergang | 2 s | Für die Anpassungen jede Minute. IKEA-Lampen ignorieren während eines Übergangs andere Befehle, deshalb kurz halten. |
-| Fortsetzen nach | 0 (nie) | Manuelle Änderungen enden nach dieser Zeit von selbst. |
-| Helligkeit getrennt für IKEA-Lampen | Aus | Für Lampen, die Helligkeit und Farbtemperatur nicht sauber gleichzeitig ändern, z. B. beim Einschalten eines Raums mit einer Helligkeit: zuerst die Farbtemperatur, eine halbe Sekunde nach dem Übergang die Helligkeit. „Nur IKEA-Lampen“ erkennt sie am Hersteller des Geräts. |
+| Smallest change | 50 K | Lights that are on only get a new color temperature once the target differs at least this much. |
+| Transition | 2 s | For the updates every minute. IKEA lights ignore other commands during a transition, so keep it short. |
+| Resume after | 0 (never) | Manual changes end by themselves after this time. |
+| Separate brightness for IKEA lights | Off | For lights that do not change brightness and color temperature together cleanly, e.g. when turning on a room with a brightness: the color temperature first, the brightness half a second after the transition. "IKEA lights only" recognizes them by the device's manufacturer. |
 
-## Manuelle Änderungen
+## Manual changes
 
-Stellst du von Hand eine Farbtemperatur oder Farbe ein, lässt der Zeitplan die Farbe im Raum in Ruhe. Dimmen ist keine solche Änderung: Die Helligkeit gehört ohnehin dir, die Farbtemperatur folgt weiter dem Zeitplan.
+When you set a color temperature or color by hand, the schedule leaves the color in that room alone. Dimming is no such change: the brightness is yours anyway, and the color temperature keeps following the schedule.
 
-Als manuell zählt:
+These count as manual:
 
-- eine Farbtemperatur oder Farbe über das Raum-Licht (Kachel, Regler, Szene);
-- ein Befehl mit Farbtemperatur oder Farbe an eine einzelne Lampe, z. B. über ihre eigene Kachel, eine Automation oder eine Szene;
-- eine Änderung außerhalb von Home Assistant, z. B. über eine direkt gekoppelte Fernbedienung. Sie zählt ab 150 K Abweichung von dem, was Light Buddy zuletzt gesendet hat, oder wenn die Lampe auf eine Farbe wechselt.
+- a color temperature or color through the room light (tile, slider, scene);
+- a command with a color temperature or color to a single light, e.g. through its own tile, an automation or a scene;
+- a change outside Home Assistant, e.g. with a remote paired directly to a light. It counts from a difference of 150 K to what Light Buddy sent last, or when the light switches to a color.
 
-Einschalten ohne Werte ist keine manuelle Änderung.
+Turning on without values is no manual change.
 
-Die Pause endet:
+The pause ends:
 
-- wenn alle Lampen im Raum aus sind; beim nächsten Einschalten gilt wieder der Zeitplan;
-- mit **Zeitplan fortsetzen** (`button.resume_schedule_<bereich>`); der Zeitplan wird sofort wieder angewendet.
+- when all lights in the room are off; the next turn on follows the schedule again;
+- with **Resume schedule** (`button.resume_schedule_<area>`); the schedule is applied again right away;
+- optionally after the time set in **Resume after**.
 
-Ob der Zeitplan gerade pausiert, zeigt der Schalter **Zeitplan** in den Attributen `paused` und `paused_since`.
+Whether the schedule is paused right now is shown by the **Schedule** switch in its attributes `paused` and `paused_since`.
 
-## Verhalten
+## Behavior
 
-- **Zustand:** Der Raum ist an, sobald eine Lampe an ist. Helligkeit und Farbtemperatur sind der Mittelwert der eingeschalteten Lampen.
-- **Farben:** Farben gehen nur an Lampen, die Farbe können. Weiße Lampen bekommen dabei nur die Helligkeit.
-- **Zigbee-Netz:**
-  - Lampen mit gleichen Werten werden in einem Aufruf zusammengefasst.
-  - Pro Raum geht höchstens alle 0,3 s ein Befehl raus. Beim Ziehen am Regler wird nur der letzte Wert gesendet.
-  - Ausschalten wird nur an Lampen geschickt, die nicht schon aus sind.
-- **Bereich:** Die Light-Buddy-Entität ist bewusst keinem Bereich zugeordnet. Sonst würden Bereichs-Aktionen wie „Alle Lichter im Wohnzimmer aus“ jede Lampe doppelt ansteuern.
+- **State:** the room is on as soon as one light is on. Brightness and color temperature are the average of the lights that are on.
+- **Colors:** colors only go to lights that support color. White lights only get the brightness.
+- **Zigbee network:**
+  - Lights with the same values share one call.
+  - Each room sends at most one command every 0.3 s. While dragging a slider, only the latest value is sent.
+  - Turning off is only sent to lights that are not off already.
+- **Area:** Light Buddy's entities are deliberately not assigned to an area. Otherwise area actions like "turn off all lights in the living room" would control every light twice.
 
-## Entwicklung
+## Development
 
 ```sh
 python3.14 -m venv .venv
@@ -149,7 +155,7 @@ python3.14 -m venv .venv
 
 ### Icon
 
-Das Icon liegt als SVG in `assets/icon.svg`. Neu rendern (macOS, nutzt QuickLook):
+The icon is an SVG in `assets/icon.svg`. To render it again (macOS, uses QuickLook):
 
 ```sh
 .venv/bin/python assets/render_icon.py assets/icon.svg
@@ -157,5 +163,4 @@ cp assets/icon.256.png custom_components/light_buddy/brand/icon.png
 cp assets/icon.512.png custom_components/light_buddy/brand/icon@2x.png
 ```
 
-Home Assistant zeigt die Bilder aus `custom_components/light_buddy/brand/` direkt an.
-
+Home Assistant shows the images from `custom_components/light_buddy/brand/` directly.

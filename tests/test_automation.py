@@ -1,6 +1,5 @@
 """Tests for following the schedule."""
 
-import datetime as dt
 from datetime import timedelta
 
 from freezegun.api import FrozenDateTimeFactory
@@ -10,7 +9,6 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.light_buddy.schedule import SchedulePoint
 from homeassistant.components.light import DATA_COMPONENT, ColorMode
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE
 from homeassistant.core import Context, HomeAssistant
@@ -53,7 +51,6 @@ async def test_entities(hass: HomeAssistant, add_light, setup_integration) -> No
     sensor = hass.states.get(TARGET)
     assert sensor.state == "5000"
     assert sensor.attributes["unit_of_measurement"] == "K"
-    assert sensor.attributes["brightness"] is None
 
 
 async def test_tick_updates_lights_that_are_on(
@@ -225,35 +222,6 @@ async def test_schedule_switch_is_stored(
     assert entry.options["schedules_off"] == ["wohnzimmer"]
 
 
-async def test_brightness_leaves_colored_lights_alone(
-    hass: HomeAssistant, add_light, setup_integration
-) -> None:
-    """A schedule with brightness does not dim lights showing a color."""
-    # At its maximum of 4000 K, as close to the target as it gets.
-    white = add_light(
-        "white", area="Wohnzimmer", state=STATE_ON, attributes=_on(COLOR_LIGHT, 4000)
-    )
-    add_light(
-        "red",
-        area="Wohnzimmer",
-        state=STATE_ON,
-        attributes={**COLOR_LIGHT, "color_mode": ColorMode.XY, "brightness": 255},
-    )
-    entry = await setup_integration(schedule=True)
-    automation = entry.runtime_data._automations["wohnzimmer"]
-    automation.points = (
-        SchedulePoint(5000, dt.time(0, 0), brightness=30),
-        SchedulePoint(5000, dt.time(12, 0), brightness=30),
-    )
-    calls = async_mock_service(hass, "light", "turn_on")
-
-    await _tick(hass)
-    assert [call.data for call in calls] == [
-        # 30 % as Home Assistant converts it.
-        {"entity_id": [white], "brightness": 76, "transition": 2}
-    ]
-
-
 async def test_target_follows_time(
     hass: HomeAssistant,
     add_light,
@@ -335,22 +303,20 @@ async def test_schedule_changes_apply_without_reload(
     )
     entry = await setup_integration(schedule=True)
     automation = entry.runtime_data._automations["wohnzimmer"]
-    automation.async_mark_manual({"brightness"})
+    automation.async_mark_manual()
     room = hass.data[DATA_COMPONENT].get_entity(ROOM)
 
     hass.config_entries.async_update_entry(
         entry,
         options={
             **entry.options,
-            "schedule": [
-                {"time": "00:00", "kelvin": 3000, "brightness": None, "weekdays": []}
-            ],
+            "schedule": [{"time": "00:00", "kelvin": 3000, "weekdays": []}],
         },
     )
     await hass.async_block_till_done()
     assert hass.states.get(TARGET).state == "3000"
     assert hass.data[DATA_COMPONENT].get_entity(ROOM) is room
-    assert automation.paused == {"brightness"}
+    assert automation.paused
     assert hass.states.get(lamp).state == STATE_ON
 
 
@@ -398,10 +364,10 @@ async def test_auto_resume_counts_from_last_change(
     )
     entry = await setup_integration(schedule=True)
     automation = entry.runtime_data._automations["wohnzimmer"]
-    automation.async_mark_manual({"color_temp"})
+    automation.async_mark_manual()
     automation._paused_at -= 50 * 60
 
     automation.async_set_settings(ScheduleSettings(auto_resume_minutes=30))
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
     await hass.async_block_till_done()
-    assert automation.paused == set()
+    assert not automation.paused

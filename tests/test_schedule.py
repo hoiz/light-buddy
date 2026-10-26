@@ -57,17 +57,6 @@ def test_weekdays() -> None:
     assert 2200 < target_at(points, _at(7, 0, saturday)).kelvin < 2700
 
 
-def test_brightness_between_points_that_have_one() -> None:
-    """Points without brightness do not interrupt the brightness curve."""
-    points = [
-        SchedulePoint(3000, dt.time(6, 0), brightness=40),
-        SchedulePoint(4000, dt.time(8, 0)),
-        SchedulePoint(5000, dt.time(10, 0), brightness=100),
-    ]
-    assert target_at(points, _at(8, 0)) == Target(4000, 70)
-    assert target_at(DEFAULT_SCHEDULE, _at(8, 0)).brightness is None
-
-
 def test_sun_point() -> None:
     """Sun points use the day's sun time plus their offset."""
 
@@ -107,20 +96,6 @@ def test_daylight_saving_change() -> None:
     assert target_at(points, _at(4, 0, day)) == Target(3000)
 
 
-def test_brightness_on_some_days_only() -> None:
-    """Brightness points on weekdays carry over the weekend."""
-    weekdays = frozenset(range(5))
-    points = [
-        SchedulePoint(3000, dt.time(6, 0)),
-        SchedulePoint(4000, dt.time(18, 0)),
-        SchedulePoint(4000, dt.time(8, 0), brightness=100, weekdays=weekdays),
-        SchedulePoint(4000, dt.time(20, 0), brightness=40, weekdays=weekdays),
-    ]
-    saturday = MONDAY + dt.timedelta(days=5)
-    # Between Friday 20:00 and Monday 08:00.
-    assert 40 < target_at(points, _at(12, 0, saturday)).brightness < 100
-
-
 def test_options_round_trip() -> None:
     """Points survive storing, and are stored sorted by time."""
     from custom_components.light_buddy.schedule import (
@@ -129,7 +104,7 @@ def test_options_round_trip() -> None:
     )
 
     points = (
-        SchedulePoint(3000, dt.time(18, 0), brightness=40),
+        SchedulePoint(3000, dt.time(18, 0)),
         SchedulePoint(5000, dt.time(7, 0), weekdays=frozenset({0, 1, 2, 3, 4})),
     )
     stored = points_to_options(points)

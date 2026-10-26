@@ -47,11 +47,9 @@
         "data": {
           "time": "Time",
           "kelvin": "Color temperature",
-          "brightness": "Brightness",
           "weekdays": "Weekdays"
         },
         "data_description": {
-          "brightness": "Leave empty to keep the brightness as it is.",
           "weekdays": "Leave empty for every day."
         }
       },
@@ -80,13 +78,13 @@
           "threshold": "Smallest change",
           "transition": "Transition",
           "auto_resume_minutes": "Resume after",
-          "separate_commands": "Separate brightness and color"
+          "separate_commands": "Separate brightness for IKEA lights"
         },
         "data_description": {
           "threshold": "Lights that are on only get a new color temperature once the target differs at least this much.",
           "transition": "For the schedule's updates every minute. Keep it short: IKEA lights ignore other commands, even turning off, during a transition.",
           "auto_resume_minutes": "Manual changes end by themselves after this time. 0 keeps them until the room is off.",
-          "separate_commands": "Some lights, IKEA ones in particular, do not change brightness and color together cleanly. They then get the color first and the brightness half a second later."
+          "separate_commands": "Some lights, IKEA ones in particular, do not change brightness and color temperature together cleanly, e.g. when turning on a room with a brightness. They then get the color temperature first and the brightness half a second later."
         }
       }
     },
@@ -140,12 +138,7 @@
     },
     "sensor": {
       "target_color_temperature": {
-        "name": "Target color temperature {area}",
-        "state_attributes": {
-          "brightness": {
-            "name": "Brightness"
-          }
-        }
+        "name": "Target color temperature {area}"
       }
     },
     "button": {

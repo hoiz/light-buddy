@@ -1,6 +1,6 @@
 """The schedule's target per room."""
 
-from typing import Any, override
+from typing import override
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import Platform, UnitOfTemperature
@@ -40,10 +40,3 @@ class TargetColorTempSensor(RoomEntity, SensorEntity):
         """Return the target color temperature."""
         target = self._automation.target
         return target.kelvin if target else None
-
-    @property
-    @override
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the target brightness in percent, if the schedule has one."""
-        target = self._automation.target
-        return {"brightness": target.brightness if target else None}

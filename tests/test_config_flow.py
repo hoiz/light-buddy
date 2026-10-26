@@ -99,11 +99,11 @@ async def test_schedule_add_edit_delete(
         entry,
         flow_id,
         "add_point",
-        {"time": "14:00:00", "kelvin": 4800, "brightness": 80, "weekdays": ["5", "6"]},
+        {"time": "14:00:00", "kelvin": 4800, "weekdays": ["5", "6"]},
     )
     assert result["step_id"] == "schedule"
     assert (
-        "| 14:00 | 4800 K | 80 % | Sat, Sun |"
+        "| 14:00 | 4800 K | Sat, Sun |"
         in (result["description_placeholders"]["points"])
     )
 
@@ -113,7 +113,6 @@ async def test_schedule_add_edit_delete(
     assert _suggested(result) == {
         "time": "14:00:00",
         "kelvin": 4800,
-        "brightness": 80,
         "weekdays": ["5", "6"],
     }
     result = await hass.config_entries.options.async_configure(
@@ -142,7 +141,6 @@ async def test_schedule_add_edit_delete(
     assert schedule[3] == {
         "time": "14:00",
         "kelvin": 4700,
-        "brightness": None,
         "weekdays": [],
     }
 
@@ -190,7 +188,6 @@ async def test_weekday_points_at_same_time(
                 {
                     "time": "07:00",
                     "kelvin": 5000,
-                    "brightness": None,
                     "weekdays": [0, 1, 2, 3, 4],
                 },
             ]
@@ -212,7 +209,7 @@ async def test_schedule_reset_and_cancel(
 ) -> None:
     """Reset needs confirming, and nothing is stored before saving."""
     add_light("lamp", area="Wohnzimmer")
-    stored = [{"time": "07:00", "kelvin": 5000, "brightness": None, "weekdays": []}]
+    stored = [{"time": "07:00", "kelvin": 5000, "weekdays": []}]
     entry = await setup_integration({"schedule": stored})
     flow_id = (await _open(hass, entry, "schedule"))["flow_id"]
 

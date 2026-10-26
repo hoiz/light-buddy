@@ -1,4 +1,4 @@
-"""Color temperature and brightness by time of day.
+"""Color temperature by time of day.
 
 Pure functions without Home Assistant state, so they can be tested directly.
 """
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import datetime as dt
 from typing import Any
 
-from .const import CONF_BRIGHTNESS, CONF_KELVIN, CONF_TIME, CONF_WEEKDAYS
+from .const import CONF_KELVIN, CONF_TIME, CONF_WEEKDAYS
 
 # Interpolating mireds looks even, interpolating Kelvin would not.
 MIRED = 1_000_000
@@ -19,7 +19,7 @@ SEARCH_DAYS = 7
 
 @dataclass(frozen=True, slots=True)
 class SchedulePoint:
-    """A color temperature, and optionally a brightness, at a time of day.
+    """A color temperature at a time of day.
 
     The time is either a clock time, or a sun event like "sunset" shifted by
     some minutes. Weekdays limit the point to some days, 0 is Monday.
@@ -29,7 +29,6 @@ class SchedulePoint:
     time: dt.time | None = None
     sun_event: str | None = None
     offset_minutes: int = 0
-    brightness: int | None = None
     weekdays: frozenset[int] | None = None
 
 
@@ -38,8 +37,6 @@ class Target:
     """What the lights of a room should show now."""
 
     kelvin: int
-    # In percent, None leaves the brightness alone.
-    brightness: int | None = None
 
 
 # Follows daylight, coldest around noon, and does not start the morning as
@@ -65,8 +62,8 @@ def target_at(
 ) -> Target | None:
     """Return the target at a time, interpolated between the schedule's points.
 
-    Works across midnight and across days with different points. Brightness
-    is only interpolated between points that have one. None without points.
+    Works across midnight and across days with different points. None
+    without points.
     """
     # Most schedules have points every day, so a day around now is enough.
     for search_days in (1, SEARCH_DAYS):
@@ -78,15 +75,7 @@ def target_at(
             break
     else:
         return None
-    brightness = _interpolate_brightness(occurrences, now)
-    if brightness is None and search_days < SEARCH_DAYS:
-        # Brightness may come from fewer points than color temperature.
-        brightness = _interpolate_brightness(
-            _occurrences(points, now, sun_time, SEARCH_DAYS), now
-        )
-    return Target(
-        round(MIRED / kelvin), None if brightness is None else round(brightness)
-    )
+    return Target(round(MIRED / kelvin))
 
 
 def _occurrences(
@@ -121,19 +110,6 @@ def _occurrences(
     return occurrences
 
 
-def _interpolate_brightness(
-    occurrences: Sequence[tuple[dt.datetime, SchedulePoint]], now: dt.datetime
-) -> float | None:
-    return _interpolate(
-        [
-            (when, point.brightness)
-            for when, point in occurrences
-            if point.brightness is not None
-        ],
-        now,
-    )
-
-
 def _interpolate(
     values: Sequence[tuple[dt.datetime, float]], now: dt.datetime
 ) -> float | None:
@@ -166,7 +142,6 @@ def points_from_options(
         SchedulePoint(
             kelvin=int(point[CONF_KELVIN]),
             time=dt.time.fromisoformat(point[CONF_TIME]),
-            brightness=point.get(CONF_BRIGHTNESS),
             weekdays=frozenset(point[CONF_WEEKDAYS])
             if point.get(CONF_WEEKDAYS)
             else None,
@@ -181,7 +156,6 @@ def points_to_options(points: Sequence[SchedulePoint]) -> list[dict[str, Any]]:
         {
             CONF_TIME: point.time.strftime("%H:%M"),
             CONF_KELVIN: point.kelvin,
-            CONF_BRIGHTNESS: point.brightness,
             CONF_WEEKDAYS: sorted(point.weekdays) if point.weekdays else [],
         }
         for point in sort_points(points)
@@ -210,7 +184,7 @@ def same_slot(point: SchedulePoint, other: SchedulePoint) -> bool:
 
 
 ALL_WEEKDAYS = frozenset(range(7))
-# For ranges of days, and for no brightness.
+# For ranges of days.
 DASH = "\u2013"
 
 WEEKDAY_NAMES = {
@@ -241,33 +215,29 @@ def format_weekdays(weekdays: frozenset[int] | None, language: str) -> str:
     return ", ".join(parts)
 
 
-def point_columns(point: SchedulePoint, language: str) -> tuple[str, str, str, str]:
-    """Return a point's time, color temperature, brightness and days as text."""
+def point_columns(point: SchedulePoint, language: str) -> tuple[str, str, str]:
+    """Return a point's time, color temperature and days as text."""
     return (
         point.time.strftime("%H:%M") if point.time else "",
         f"{point.kelvin} K",
-        DASH if point.brightness is None else f"{point.brightness} %",
         format_weekdays(point.weekdays, language),
     )
 
 
 def format_point(point: SchedulePoint, language: str) -> str:
-    """Return a point as one line, e.g. "06:30 · 3000 K · 40 % · Mo-Fr"."""
-    time, kelvin, brightness, days = point_columns(point, language)
-    # Without brightness, left out instead of shown as a dash.
-    columns = (time, kelvin) if point.brightness is None else (time, kelvin, brightness)
-    return " · ".join((*columns, days))
+    """Return a point as one line, e.g. "06:30 · 3000 K · Mo-Fr"."""
+    return " · ".join(point_columns(point, language))
 
 
 TABLE_HEADERS = {
-    "de": ("Uhrzeit", "Farbtemperatur", "Helligkeit", "Tage"),
-    "en": ("Time", "Color temperature", "Brightness", "Days"),
+    "de": ("Uhrzeit", "Farbtemperatur", "Tage"),
+    "en": ("Time", "Color temperature", "Days"),
 }
 
 
 def format_table(points: Sequence[SchedulePoint], language: str) -> str:
     """Return points as a Markdown table, in their order, for the options flow."""
     header = TABLE_HEADERS.get(language, TABLE_HEADERS["en"])
-    rows = [f"| {' | '.join(header)} |", "|---|---|---|---|"]
+    rows = [f"| {' | '.join(header)} |", "|---|---|---|"]
     rows.extend(f"| {' | '.join(point_columns(point, language))} |" for point in points)
     return "\n".join(rows)

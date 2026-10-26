@@ -18,7 +18,6 @@ CONF_SCHEDULES_OFF: Final = "schedules_off"
 CONF_SCHEDULE: Final = "schedule"
 CONF_TIME: Final = "time"
 CONF_KELVIN: Final = "kelvin"
-CONF_BRIGHTNESS: Final = "brightness"
 CONF_WEEKDAYS: Final = "weekdays"
 
 # Global settings.
@@ -53,18 +52,12 @@ TRANSITION_TURN_ON: Final = 1
 # Smaller changes of the target are not sent to lights that are on. A
 # setting, this is its default.
 COLOR_TEMP_THRESHOLD_KELVIN: Final = 50
-BRIGHTNESS_THRESHOLD: Final = 5  # of 255, about 2 %
 
-# Attributes the schedule leaves alone after they were changed by hand.
-PAUSE_COLOR_TEMP: Final = "color_temp"
-PAUSE_BRIGHTNESS: Final = "brightness"
-
-# Changes outside Home Assistant count as manual from these differences to
+# Changes outside Home Assistant count as manual from this difference to
 # what was last sent, after the transition plus this grace.
 MANUAL_COLOR_TEMP_THRESHOLD_KELVIN: Final = 150
-MANUAL_BRIGHTNESS_THRESHOLD: Final = 13  # of 255, about 5 %
 TRANSITION_GRACE_SECONDS: Final = 2
 
-# Between the color and the brightness command of lights that get them
-# separately, after the transition.
+# Between the color temperature and the brightness command of lights that
+# get them separately, after the transition.
 SEPARATE_COMMANDS_PAUSE_SECONDS: Final = 0.5

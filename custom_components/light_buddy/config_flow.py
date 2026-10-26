@@ -18,7 +18,6 @@ from homeassistant.helpers import selector
 from .automation import ScheduleSettings
 from .const import (
     CONF_AUTO_RESUME_MINUTES,
-    CONF_BRIGHTNESS,
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
     CONF_KELVIN,
@@ -174,7 +173,7 @@ class LightBuddyOptionsFlow(OptionsFlow):
     async def async_step_point(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Set the time, color temperature, brightness and days of a point."""
+        """Set the time, color temperature and days of a point."""
         errors: dict[str, str] = {}
         if user_input is not None and CONF_TIME in user_input:
             point = _point_from_form(user_input)
@@ -300,7 +299,6 @@ class LightBuddyOptionsFlow(OptionsFlow):
 
 def _point_from_form(user_input: dict[str, Any]) -> SchedulePoint:
     """Return the point entered in the point form."""
-    brightness = user_input.get(CONF_BRIGHTNESS)
     weekdays = user_input.get(CONF_WEEKDAYS)
     return SchedulePoint(
         kelvin=int(user_input[CONF_KELVIN]),
@@ -308,7 +306,6 @@ def _point_from_form(user_input: dict[str, Any]) -> SchedulePoint:
         time=dt.time.fromisoformat(user_input[CONF_TIME]).replace(
             second=0, microsecond=0
         ),
-        brightness=None if brightness is None else int(brightness),
         weekdays=frozenset(int(day) for day in weekdays) if weekdays else None,
     )
 
@@ -320,8 +317,6 @@ def _point_form_values(point: SchedulePoint) -> dict[str, Any]:
         CONF_KELVIN: point.kelvin,
         CONF_WEEKDAYS: [str(day) for day in sorted(point.weekdays or ())],
     }
-    if point.brightness is not None:
-        values[CONF_BRIGHTNESS] = point.brightness
     return values
 
 
@@ -335,15 +330,6 @@ POINT_SCHEMA = probatio.Schema(
                 step=50,
                 unit_of_measurement="K",
                 mode=selector.NumberSelectorMode.SLIDER,
-            )
-        ),
-        probatio.Optional(CONF_BRIGHTNESS): selector.NumberSelector(
-            selector.NumberSelectorConfig(
-                min=1,
-                max=100,
-                step=1,
-                unit_of_measurement="%",
-                mode=selector.NumberSelectorMode.BOX,
             )
         ),
         probatio.Optional(CONF_WEEKDAYS): selector.SelectSelector(

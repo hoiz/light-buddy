@@ -10,14 +10,7 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Any, Self
 
-from homeassistant.components.light import (
-    ATTR_BRIGHTNESS,
-    ATTR_BRIGHTNESS_PCT,
-    ATTR_BRIGHTNESS_STEP,
-    ATTR_BRIGHTNESS_STEP_PCT,
-    ATTR_COLOR_NAME,
-    ATTR_PROFILE,
-)
+from homeassistant.components.light import ATTR_COLOR_NAME, ATTR_PROFILE
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.helpers.sun import get_astral_event_date
@@ -30,8 +23,6 @@ from .const import (
     CONF_SETTINGS,
     CONF_THRESHOLD,
     CONF_TRANSITION,
-    PAUSE_BRIGHTNESS,
-    PAUSE_COLOR_TEMP,
     SCHEDULE_INTERVAL,
     SEPARATE_OFF,
     TRANSITION_SCHEDULE,
@@ -52,15 +43,6 @@ RECENT_PAUSE_SECONDS = 10
 
 
 # Also the forms of service calls, before Home Assistant converts them.
-BRIGHTNESS_PARAMS = frozenset(
-    {
-        ATTR_BRIGHTNESS,
-        ATTR_BRIGHTNESS_PCT,
-        ATTR_BRIGHTNESS_STEP,
-        ATTR_BRIGHTNESS_STEP_PCT,
-        ATTR_PROFILE,
-    }
-)
 COLOR_PARAMS = COLOR_GROUP_ATTRS | {ATTR_COLOR_NAME, ATTR_PROFILE}
 
 
@@ -75,7 +57,7 @@ class ScheduleSettings:
     # A pause ends by itself after this many minutes, 0 keeps it until the
     # room is off.
     auto_resume_minutes: float = 0
-    # Which lights get brightness and color as separate commands.
+    # Which lights get a brightness separately from the color temperature.
     separate_commands: str = SEPARATE_OFF
 
     @classmethod
@@ -95,17 +77,12 @@ class ScheduleSettings:
         )
 
 
-def manual_attributes(params: Mapping[str, Any]) -> set[str]:
-    """Return what a turn on with these params sets on purpose.
+def sets_color(params: Mapping[str, Any]) -> bool:
+    """Return True if a turn on with these params sets a color on purpose.
 
-    Colors count as color temperature, since they take its place.
+    Colors count, too, since they take the color temperature's place.
     """
-    attributes = set()
-    if not BRIGHTNESS_PARAMS.isdisjoint(params):
-        attributes.add(PAUSE_BRIGHTNESS)
-    if not COLOR_PARAMS.isdisjoint(params):
-        attributes.add(PAUSE_COLOR_TEMP)
-    return attributes
+    return not COLOR_PARAMS.isdisjoint(params)
 
 
 class RoomAutomation:
@@ -145,9 +122,9 @@ class RoomAutomation:
         self._unsubs: list[CALLBACK_TYPE] = []
         self._turned_on: set[str] = set()
         self._unsub_turned_on: CALLBACK_TYPE | None = None
-        # Attributes changed by hand, which the schedule leaves alone until
-        # the room is off or resumed.
-        self.paused: set[str] = set()
+        # Set when the color was changed by hand, which the schedule then
+        # leaves alone until the room is off or resumed.
+        self.paused = False
         self.paused_since: dt.datetime | None = None
         self._paused_at = 0.0
         self._unsub_auto_resume: CALLBACK_TYPE | None = None
@@ -248,21 +225,20 @@ class RoomAutomation:
             await self._async_apply()
 
     @callback
-    def async_mark_manual(self, attributes: set[str], *, command: bool = True) -> None:
-        """Leave attributes changed by hand alone until the room is off.
+    def async_mark_manual(self, *, new_change: bool = True) -> None:
+        """Leave the color changed by hand alone until the room is off.
 
-        Every command that changes something by hand starts the automatic
-        resume over. Lights reporting a difference that is paused already
-        do not, as they keep reporting it.
+        Every new change by hand starts the automatic resume over. Lights
+        reporting a difference that is paused already do not, as they keep
+        reporting it.
         """
-        if command or not attributes <= self.paused:
+        if new_change or not self.paused:
             self._paused_at = self.hass.loop.time()
             self._async_start_auto_resume()
-        if attributes <= self.paused:
+        if self.paused:
             return
-        if not self.paused:
-            self.paused_since = dt_util.utcnow()
-        self.paused |= attributes
+        self.paused = True
+        self.paused_since = dt_util.utcnow()
         self._async_notify()
 
     @callback
@@ -309,7 +285,7 @@ class RoomAutomation:
         if (light := self.light) is not None:
             light.async_take_shown()
         if self.paused:
-            self.paused.clear()
+            self.paused = False
             self.paused_since = None
             self._async_notify()
 
@@ -363,7 +339,8 @@ class RoomAutomation:
         members: list[str] | None = None,
     ) -> None:
         async with self._apply_lock:
-            if not self.active or (light := self.light) is None:
+            # While paused, the color stays as it was set by hand.
+            if not self.active or self.paused or (light := self.light) is None:
                 return
             assert self.target is not None
             # Lights that never answer are given up on per call.
@@ -373,7 +350,6 @@ class RoomAutomation:
                     self.settings.transition if transition is None else transition,
                     members=members,
                     threshold=self.settings.threshold,
-                    paused=frozenset(self.paused),
                 )
             except Exception:
                 # Failed calls are logged per light, the next tick tries again.

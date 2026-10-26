@@ -55,8 +55,8 @@ async def test_separate_commands_for_ikea(
         "brightness": 100,
         "transition": 0.5,
     }
-    sent = room._commander.last_sent[ikea]
-    assert sent["brightness"].sent_at > sent["color_temp_kelvin"].sent_at
+    # The brightness keeps the color temperature as the value to compare.
+    assert room._commander.last_sent[ikea].value == 3000
 
 
 async def test_separate_commands_off(

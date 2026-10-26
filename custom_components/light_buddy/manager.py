@@ -4,12 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
 import logging
-import math
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.light import (
     ATTR_SUPPORTED_COLOR_MODES,
-    ATTR_TRANSITION,
     DOMAIN as LIGHT_DOMAIN,
     color_temp_supported,
 )
@@ -20,7 +18,6 @@ from homeassistant.const import (
     ATTR_SERVICE_DATA,
     EVENT_CALL_SERVICE,
     SERVICE_TOGGLE,
-    SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_ON,
     Platform,
@@ -38,7 +35,7 @@ from homeassistant.helpers.target import (
     async_extract_referenced_entity_ids,
 )
 
-from .automation import RoomAutomation, ScheduleSettings, manual_attributes
+from .automation import RoomAutomation, ScheduleSettings, sets_color
 from .const import (
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
@@ -64,9 +61,6 @@ type ManagedEntity = RoomLight | RoomEntity | LightOffsetEntity
 
 # Registry changes that can move a light between rooms, change whether it
 # gets offset settings, or rename them.
-# The longest transition Home Assistant accepts.
-MAX_TRANSITION_SECONDS = 6553
-
 REFRESH_FIELDS = frozenset(
     {"area_id", "capabilities", "device_id", "disabled_by", "name", "original_name"}
 )
@@ -138,21 +132,14 @@ class RoomManager:
 
     @callback
     def _async_light_service_called(self, event: Event[Mapping[str, Any]]) -> None:
-        """Note what others do to the lights of a room.
+        """Pause the schedule for colors others set on the lights of a room.
 
-        Values set on purpose are paused, for lights controlled directly, by
-        automations, and by scenes, which apply their states through
-        light.turn_on as well. Lights turned off with a transition fade out,
-        which is not a change by hand.
+        Covers lights controlled directly, by automations, and by scenes,
+        which apply their states through light.turn_on as well.
         """
-        service = event.data[ATTR_SERVICE]
         service_data = event.data[ATTR_SERVICE_DATA]
-        transition = _seconds(service_data.get(ATTR_TRANSITION))
-        attributes: set[str] = set()
-        if service != SERVICE_TURN_OFF:
-            attributes = manual_attributes(service_data)
-            if not attributes and not (service == SERVICE_TOGGLE and transition):
-                return
+        if not sets_color(service_data):
+            return
         # Groups are not expanded: a call to a room light is handled by it.
         selected = async_extract_referenced_entity_ids(
             self.hass, TargetSelection(service_data), expand_group=False
@@ -163,24 +150,14 @@ class RoomManager:
             light = self._lights.get(area_id)
             if light is not None and light.is_own_context(event.context):
                 continue
-            is_on = (
-                state := self.hass.states.get(entity_id)
-            ) is not None and state.state == STATE_ON
-            # Lights fade out when turned off, some even without a transition.
-            # A toggle may turn a light off, too, also one about to turn on.
-            if light is not None and (
-                service == SERVICE_TURN_OFF
-                or (service == SERVICE_TOGGLE and transition)
+            # A toggle only turns lights that are off on, with its color.
+            if event.data[ATTR_SERVICE] == SERVICE_TOGGLE and (
+                (state := self.hass.states.get(entity_id)) is not None
+                and state.state == STATE_ON
             ):
-                light.async_member_turning_off(entity_id, transition)
-            # A toggle only turns lights that are off on, with its values.
-            if (
-                service != SERVICE_TURN_OFF
-                and not (service == SERVICE_TOGGLE and is_on)
-                and attributes
-                and (automation := self._automations.get(area_id)) is not None
-            ):
-                automation.async_mark_manual(attributes)
+                continue
+            if (automation := self._automations.get(area_id)) is not None:
+                automation.async_mark_manual()
 
     @callback
     def async_refresh(self) -> None:
@@ -577,24 +554,12 @@ def _exclusions(options: Mapping[str, Any]) -> tuple[set[str], set[str]]:
     )
 
 
-def _seconds(value: Any) -> float:
-    """Return a transition from service data, which is not validated yet."""
-    try:
-        seconds = float(value)
-    except TypeError, ValueError:
-        return 0
-    if not math.isfinite(seconds):
-        return 0
-    return min(max(seconds, 0), MAX_TRANSITION_SECONDS)
-
-
 @callback
 def _light_service_filter(event_data: Mapping[str, Any]) -> bool:
-    """Only calls that turn lights on or off matter."""
+    """Only calls that turn lights on can set a color."""
     return event_data[ATTR_DOMAIN] == LIGHT_DOMAIN and event_data[ATTR_SERVICE] in (
         SERVICE_TURN_ON,
         SERVICE_TOGGLE,
-        SERVICE_TURN_OFF,
     )
 
 

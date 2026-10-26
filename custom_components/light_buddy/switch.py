@@ -35,9 +35,9 @@ class ScheduleSwitch(RoomEntity, SwitchEntity):
     @property
     @override
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return what the schedule leaves alone after manual changes."""
+        """Return whether a color set by hand pauses the schedule, since when."""
         return {
-            "paused": sorted(self._automation.paused),
+            "paused": self._automation.paused,
             "paused_since": self._automation.paused_since,
         }
 

@@ -47,11 +47,9 @@
         "data": {
           "time": "Uhrzeit",
           "kelvin": "Farbtemperatur",
-          "brightness": "Helligkeit",
           "weekdays": "Wochentage"
         },
         "data_description": {
-          "brightness": "Leer lassen, damit die Helligkeit bleibt, wie sie ist.",
           "weekdays": "Leer lassen für jeden Tag."
         }
       },
@@ -80,13 +78,13 @@
           "threshold": "Kleinste Änderung",
           "transition": "Übergang",
           "auto_resume_minutes": "Fortsetzen nach",
-          "separate_commands": "Helligkeit und Farbe getrennt"
+          "separate_commands": "Helligkeit getrennt für IKEA-Lampen"
         },
         "data_description": {
           "threshold": "Eingeschaltete Lampen bekommen erst eine neue Farbtemperatur, wenn der Zielwert mindestens so weit abweicht.",
           "transition": "Für die Anpassungen des Zeitplans jede Minute. Kurz halten: IKEA-Lampen ignorieren während eines Übergangs andere Befehle, sogar das Ausschalten.",
           "auto_resume_minutes": "Manuelle Änderungen enden nach dieser Zeit von selbst. 0 behält sie, bis der Raum aus ist.",
-          "separate_commands": "Manche Lampen, vor allem von IKEA, ändern Helligkeit und Farbe nicht sauber gleichzeitig. Sie bekommen dann zuerst die Farbe und eine halbe Sekunde später die Helligkeit."
+          "separate_commands": "Manche Lampen, vor allem von IKEA, ändern Helligkeit und Farbtemperatur nicht sauber gleichzeitig, z. B. beim Einschalten eines Raums mit einer Helligkeit. Sie bekommen dann zuerst die Farbtemperatur und eine halbe Sekunde später die Helligkeit."
         }
       }
     },
@@ -140,12 +138,7 @@
     },
     "sensor": {
       "target_color_temperature": {
-        "name": "Ziel-Farbtemperatur {area}",
-        "state_attributes": {
-          "brightness": {
-            "name": "Helligkeit"
-          }
-        }
+        "name": "Ziel-Farbtemperatur {area}"
       }
     },
     "button": {

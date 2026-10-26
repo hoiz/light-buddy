@@ -296,11 +296,18 @@ class RoomManager:
         if points == self.points and settings == self.settings:
             return
         separate_changed = settings.separate_commands != self.settings.separate_commands
+        # Only these change what the lights get.
+        target_changed = (
+            points != self.points
+            or settings.threshold != self.settings.threshold
+            or settings.transition != self.settings.transition
+        )
         self.points, self.settings = points, settings
         for automation in self._automations.values():
             automation.async_set_points(points)
             automation.async_set_settings(settings)
-            automation.async_apply_soon()
+            if target_changed:
+                automation.async_apply_soon()
         if separate_changed:
             self._async_update_separate_lights()
 

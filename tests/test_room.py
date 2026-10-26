@@ -102,19 +102,52 @@ async def test_turn_off_cancels_waiting_brightness(
     assert all("brightness" not in call.data for call in on_calls[1:])
 
 
-async def test_waiting_brightness_skips_lights_now_off(
-    hass: HomeAssistant, add_light, setup_integration
+async def test_waiting_brightness_skips_lights_turned_off(
+    hass: HomeAssistant, add_light, setup_integration, freezer
 ) -> None:
-    """A light switched off meanwhile, e.g. by a wall switch, stays off."""
+    """A light switched off after its color, e.g. by a wall switch, stays off."""
     ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
     calls = async_mock_service(hass, "light", "turn_on")
     room = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")
 
     await room.async_turn_on(brightness=100, color_temp_kelvin=3000)
+    freezer.tick(0.1)
+    hass.states.async_set(ikea, STATE_ON, COLOR_LIGHT)
     hass.states.async_set(ikea, STATE_OFF, COLOR_LIGHT)
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
     await hass.async_block_till_done()
     assert len(calls) == 2
+
+
+async def test_waiting_brightness_for_lights_not_reported_on(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light that did not report on yet still gets its brightness."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    calls = async_mock_service(hass, "light", "turn_on")
+    room = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")
+
+    await room.async_turn_on(brightness=100, color_temp_kelvin=3000)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert calls[-1].data == {"entity_id": [ikea], "brightness": 100}
+
+
+async def test_color_only_command_keeps_waiting_brightness(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Only a newer brightness replaces one still waiting."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    calls = async_mock_service(hass, "light", "turn_on")
+    commander = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")._commander
+
+    await commander.async_send_now(
+        {ikea: {"brightness": 200, "color_temp_kelvin": 3000}}
+    )
+    await commander.async_send_now({ikea: {"color_temp_kelvin": 3100}})
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert calls[-1].data == {"entity_id": [ikea], "brightness": 200}
 
 
 async def test_newer_command_replaces_waiting_brightness(

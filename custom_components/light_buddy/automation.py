@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
 import datetime as dt
 import hashlib
@@ -133,7 +133,8 @@ class RoomAutomation:
         self._get_light = get_light
         self.enabled = enabled
         self._store_enabled = store_enabled
-        self._first_tick: asyncio.Task[None] | None = None
+        # Applying the schedule outside the regular ticks.
+        self._tasks: set[asyncio.Task[None]] = set()
         self.points: tuple[SchedulePoint, ...] = DEFAULT_SCHEDULE
         self.settings = ScheduleSettings()
         self.target: Target | None = None
@@ -178,9 +179,7 @@ class RoomAutomation:
                     self.hass, self._async_tick, SCHEDULE_INTERVAL
                 )
             )
-            self._first_tick = self.hass.async_create_task(
-                self._async_tick(dt_util.utcnow())
-            )
+            self._async_track(self._async_tick(dt_util.utcnow()))
 
         self._unsubs.append(async_call_later(self.hass, offset, _async_start_interval))
 
@@ -189,9 +188,8 @@ class RoomAutomation:
         """Stop following the schedule."""
         while self._unsubs:
             self._unsubs.pop()()
-        if self._first_tick is not None:
-            self._first_tick.cancel()
-            self._first_tick = None
+        for task in list(self._tasks):
+            task.cancel()
         if self._unsub_turned_on is not None:
             self._unsub_turned_on()
             self._unsub_turned_on = None
@@ -213,7 +211,8 @@ class RoomAutomation:
     def async_set_settings(self, settings: ScheduleSettings) -> None:
         """Use other settings from now on.
 
-        A changed automatic resume starts over for a running pause.
+        A changed automatic resume applies to a running pause, counted from
+        the last manual change.
         """
         changed_resume = (
             settings.auto_resume_minutes != self.settings.auto_resume_minutes
@@ -225,7 +224,14 @@ class RoomAutomation:
     @callback
     def async_apply_soon(self) -> None:
         """Apply the schedule now, e.g. after it was changed."""
-        self._first_tick = self.hass.async_create_task(self._async_apply())
+        self._async_track(self._async_apply())
+
+    @callback
+    def _async_track(self, coro: Coroutine[Any, Any, None]) -> None:
+        """Run a task that stopping the automation cancels."""
+        task = self.hass.async_create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def async_set_enabled(self, enabled: bool) -> None:
         """Turn the schedule on or off, and apply it right away when on."""
@@ -252,9 +258,10 @@ class RoomAutomation:
     def _async_start_auto_resume(self) -> None:
         self._async_cancel_auto_resume()
         if self.settings.auto_resume_minutes:
+            elapsed = self.hass.loop.time() - self._paused_at
             self._unsub_auto_resume = async_call_later(
                 self.hass,
-                self.settings.auto_resume_minutes * 60,
+                max(self.settings.auto_resume_minutes * 60 - elapsed, 0),
                 self._async_auto_resume,
             )
 

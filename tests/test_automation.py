@@ -385,3 +385,23 @@ async def test_settings_apply_right_away(
     )
     await hass.async_block_till_done()
     assert len(calls) == 1
+
+
+async def test_auto_resume_counts_from_last_change(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A shorter automatic resume ends a long running pause right away."""
+    from custom_components.light_buddy.automation import ScheduleSettings
+
+    add_light(
+        "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 3000)
+    )
+    entry = await setup_integration(schedule=True)
+    automation = entry.runtime_data._automations["wohnzimmer"]
+    automation.async_mark_manual({"color_temp"})
+    automation._paused_at -= 50 * 60
+
+    automation.async_set_settings(ScheduleSettings(auto_resume_minutes=30))
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
+    await hass.async_block_till_done()
+    assert automation.paused == set()

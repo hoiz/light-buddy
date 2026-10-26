@@ -127,8 +127,7 @@ class LightBuddyOptionsFlow(OptionsFlow):
     def points(self) -> list[SchedulePoint]:
         """Return the schedule being edited, sorted by time."""
         if self._points is None:
-            # Stored sorted, and the default is sorted, too.
-            self._points = list(
+            self._points = sort_points(
                 points_from_options(self.config_entry.options.get(CONF_SCHEDULE))
             )
         return self._points

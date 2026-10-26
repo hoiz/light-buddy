@@ -354,23 +354,22 @@ async def test_schedule_changes_apply_without_reload(
     assert hass.states.get(lamp).state == STATE_ON
 
 
-async def test_settings_apply_at_next_tick(
+async def test_settings_apply_right_away(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
-    """Threshold and transition settings change what the tick sends."""
+    """Threshold and transition settings apply as soon as they are saved."""
     add_light(
         "lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 4920)
     )
     entry = await setup_integration(schedule=True)
     calls = async_mock_service(hass, "light", "turn_on")
 
-    # 80 K off: sent with the default threshold of 50 K.
+    # 80 K off: within a threshold of 100 K.
     hass.config_entries.async_update_entry(
         entry,
         options={**entry.options, "settings": {"threshold": 100, "transition": 4}},
     )
     await hass.async_block_till_done()
-    await _tick(hass)
     assert calls == []
 
     hass.config_entries.async_update_entry(
@@ -378,5 +377,11 @@ async def test_settings_apply_at_next_tick(
         options={**entry.options, "settings": {"threshold": 50, "transition": 4}},
     )
     await hass.async_block_till_done()
-    await _tick(hass)
     assert [call.data["transition"] for call in calls] == [4]
+
+    # Options the entities store themselves do not apply the schedule again.
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "schedules_off": []}
+    )
+    await hass.async_block_till_done()
+    assert len(calls) == 1

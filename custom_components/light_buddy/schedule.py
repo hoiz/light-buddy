@@ -241,30 +241,32 @@ def format_weekdays(weekdays: frozenset[int] | None, language: str) -> str:
     return ", ".join(parts)
 
 
-def format_point(point: SchedulePoint, language: str) -> str:
-    """Return a point as one line, e.g. "06:30 · 3000 K · 40 % · Mo-Fr"."""
-    parts = [
+def point_columns(point: SchedulePoint, language: str) -> tuple[str, str, str, str]:
+    """Return a point's time, color temperature, brightness and days as text."""
+    return (
         point.time.strftime("%H:%M") if point.time else "",
         f"{point.kelvin} K",
-    ]
-    if point.brightness is not None:
-        parts.append(f"{point.brightness} %")
-    parts.append(format_weekdays(point.weekdays, language))
-    return " · ".join(parts)
+        DASH if point.brightness is None else f"{point.brightness} %",
+        format_weekdays(point.weekdays, language),
+    )
+
+
+def format_point(point: SchedulePoint, language: str) -> str:
+    """Return a point as one line, e.g. "06:30 · 3000 K · 40 % · Mo-Fr"."""
+    time, kelvin, brightness, days = point_columns(point, language)
+    parts = [time, kelvin] if point.brightness is None else [time, kelvin, brightness]
+    return " · ".join([*parts, days])
+
+
+TABLE_HEADERS = {
+    "de": ("Uhrzeit", "Farbtemperatur", "Helligkeit", "Tage"),
+    "en": ("Time", "Color temperature", "Brightness", "Days"),
+}
 
 
 def format_table(points: Sequence[SchedulePoint], language: str) -> str:
-    """Return the points as a Markdown table, for the options flow."""
-    header = {
-        "de": "| Uhrzeit | Farbtemperatur | Helligkeit | Tage |",
-        "en": "| Time | Color temperature | Brightness | Days |",
-    }.get(language, "| Time | Color temperature | Brightness | Days |")
-    rows = [header, "|---|---|---|---|"]
-    rows.extend(
-        f"| {point.time.strftime('%H:%M') if point.time else ''} "
-        f"| {point.kelvin} K "
-        f"| {DASH if point.brightness is None else f'{point.brightness} %'} "
-        f"| {format_weekdays(point.weekdays, language)} |"
-        for point in sort_points(points)
-    )
+    """Return points as a Markdown table, in their order, for the options flow."""
+    header = TABLE_HEADERS.get(language, TABLE_HEADERS["en"])
+    rows = [f"| {' | '.join(header)} |", "|---|---|---|---|"]
+    rows.extend(f"| {' | '.join(point_columns(point, language))} |" for point in points)
     return "\n".join(rows)

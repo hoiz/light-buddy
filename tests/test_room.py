@@ -8,9 +8,12 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from homeassistant.components.light import DATA_COMPONENT
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
+
+from .conftest import COLOR_LIGHT
 
 
 async def _setup(hass: HomeAssistant, add_light, setup_integration, mode: str):
@@ -38,12 +41,18 @@ async def test_separate_commands_for_ikea(
             "color_temp_kelvin": 3000,
             "transition": 1,
         },
-        {"entity_id": [ikea], "color_temp_kelvin": 3000, "transition": 1},
+        # Each command gets half of the transition.
+        {"entity_id": [ikea], "color_temp_kelvin": 3000, "transition": 0.5},
     ]
 
+    hass.states.async_set(ikea, STATE_ON, COLOR_LIGHT)
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
     await hass.async_block_till_done()
-    assert calls[2].data == {"entity_id": [ikea], "brightness": 100, "transition": 1}
+    assert calls[2].data == {
+        "entity_id": [ikea],
+        "brightness": 100,
+        "transition": 0.5,
+    }
     sent = room._commander.last_sent[ikea]
     assert sent["brightness"].sent_at > sent["color_temp_kelvin"].sent_at
 
@@ -74,3 +83,54 @@ async def test_separate_commands_all(
     assert [call.data for call in calls] == [
         {"entity_id": [ikea, other], "brightness": 100}
     ]
+
+
+async def test_turn_off_cancels_waiting_brightness(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Turning off right after turning on keeps the lights off."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    on_calls = async_mock_service(hass, "light", "turn_on")
+    async_mock_service(hass, "light", "turn_off")
+    room = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")
+
+    await room.async_turn_on(brightness=100, color_temp_kelvin=3000)
+    hass.states.async_set(ikea, STATE_ON, COLOR_LIGHT)
+    await room._commander._async_send("turn_off", {ikea: {}}, None)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert all("brightness" not in call.data for call in on_calls[1:])
+
+
+async def test_waiting_brightness_skips_lights_now_off(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light switched off meanwhile, e.g. by a wall switch, stays off."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    calls = async_mock_service(hass, "light", "turn_on")
+    room = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")
+
+    await room.async_turn_on(brightness=100, color_temp_kelvin=3000)
+    hass.states.async_set(ikea, STATE_OFF, COLOR_LIGHT)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert len(calls) == 2
+
+
+async def test_newer_command_replaces_waiting_brightness(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Brightness still waiting is dropped when the lights get a newer command."""
+    ikea, _ = await _setup(hass, add_light, setup_integration, "ikea")
+    calls = async_mock_service(hass, "light", "turn_on")
+    room = hass.data[DATA_COMPONENT].get_entity("light.all_wohnzimmer")
+    commander = room._commander
+
+    await commander.async_send_now(
+        {ikea: {"brightness": 200, "color_temp_kelvin": 3000, "transition": 10}}
+    )
+    await commander.async_send_now({ikea: {"brightness": 50}})
+    hass.states.async_set(ikea, STATE_ON, COLOR_LIGHT)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))
+    await hass.async_block_till_done()
+    assert [call.data.get("brightness") for call in calls] == [None, 50]

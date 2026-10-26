@@ -127,7 +127,8 @@ class LightBuddyOptionsFlow(OptionsFlow):
     def points(self) -> list[SchedulePoint]:
         """Return the schedule being edited, sorted by time."""
         if self._points is None:
-            self._points = sort_points(
+            # Stored sorted, and the default is sorted, too.
+            self._points = list(
                 points_from_options(self.config_entry.options.get(CONF_SCHEDULE))
             )
         return self._points
@@ -229,7 +230,7 @@ class LightBuddyOptionsFlow(OptionsFlow):
         """Go back to the default schedule, after confirming."""
         if user_input is not None:
             if user_input.get(CONF_CONFIRM):
-                self._points = sort_points(DEFAULT_SCHEDULE)
+                self._points = list(DEFAULT_SCHEDULE)
             return await self.async_step_schedule()
         return self.async_show_form(
             step_id="reset_schedule",

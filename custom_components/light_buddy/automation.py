@@ -211,9 +211,21 @@ class RoomAutomation:
 
     @callback
     def async_set_settings(self, settings: ScheduleSettings) -> None:
-        """Use other settings from now on. A new auto resume applies to the
-        next pause."""
+        """Use other settings from now on.
+
+        A changed automatic resume starts over for a running pause.
+        """
+        changed_resume = (
+            settings.auto_resume_minutes != self.settings.auto_resume_minutes
+        )
         self.settings = settings
+        if changed_resume and self.paused:
+            self._async_start_auto_resume()
+
+    @callback
+    def async_apply_soon(self) -> None:
+        """Apply the schedule now, e.g. after it was changed."""
+        self._first_tick = self.hass.async_create_task(self._async_apply())
 
     async def async_set_enabled(self, enabled: bool) -> None:
         """Turn the schedule on or off, and apply it right away when on."""
@@ -233,14 +245,18 @@ class RoomAutomation:
             self.paused_since = dt_util.utcnow()
         self._paused_at = self.hass.loop.time()
         self.paused |= attributes
+        self._async_start_auto_resume()
+        self._async_notify()
+
+    @callback
+    def _async_start_auto_resume(self) -> None:
+        self._async_cancel_auto_resume()
         if self.settings.auto_resume_minutes:
-            self._async_cancel_auto_resume()
             self._unsub_auto_resume = async_call_later(
                 self.hass,
                 self.settings.auto_resume_minutes * 60,
                 self._async_auto_resume,
             )
-        self._async_notify()
 
     async def async_resume(self) -> None:
         """Follow the schedule again in full, and apply it right away."""

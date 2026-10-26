@@ -132,8 +132,9 @@ def split_separate(
 
     Some lights, IKEA ones in particular, do not change brightness and color
     together cleanly. They get the color first, so lights turning on show the
-    right color, and the brightness later. Returns the calls to send now and
-    the ones to send later.
+    right color, and the brightness later. Each gets half of the transition,
+    so the light is busy no longer than with one command. Returns the calls to
+    send now and the ones to send later.
     """
     now: list[tuple[list[str], dict[str, Any]]] = []
     later: list[tuple[list[str], dict[str, Any]]] = []
@@ -149,10 +150,12 @@ def split_separate(
         if together := [e for e in entity_ids if e not in separate]:
             now.append((together, params))
         color = {key: value for key, value in params.items() if key != ATTR_BRIGHTNESS}
-        now.append((separated, color))
         brightness = {ATTR_BRIGHTNESS: params[ATTR_BRIGHTNESS]}
         if ATTR_TRANSITION in params:
-            brightness[ATTR_TRANSITION] = params[ATTR_TRANSITION]
+            color[ATTR_TRANSITION] = brightness[ATTR_TRANSITION] = (
+                params[ATTR_TRANSITION] / 2
+            )
+        now.append((separated, color))
         later.append((separated, brightness))
     return now, later
 
@@ -189,7 +192,9 @@ class RoomCommander:
         self._interval = interval
         self._offsets = offsets
         self._separate = separate
-        self._later: set[asyncio.Task[None]] = set()
+        # Brightness commands waiting for their color command to finish, with
+        # the lights they are for.
+        self._later: dict[asyncio.Task[None], frozenset[str]] = {}
         # Requested and sent color temperature of each light, to show the
         # requested one while the light still reports what was sent.
         self.sent_color_temps: dict[str, tuple[int, int]] = {}
@@ -291,7 +296,7 @@ class RoomCommander:
             self._unsub_timer()
             self._unsub_timer = None
         self._pending = None
-        for task in self._later:
+        for task in list(self._later):
             task.cancel()
 
     async def _async_submit(
@@ -334,6 +339,11 @@ class RoomCommander:
         if context is None:
             context = Context()
         self._own_context_ids.append(context.id)
+        # A newer command, a turn off in particular, replaces brightness still
+        # waiting to be sent to the same lights.
+        for task, entity_ids in list(self._later.items()):
+            if not entity_ids.isdisjoint(member_params):
+                task.cancel()
 
         if service == SERVICE_TURN_OFF:
             # Checked when sending, so lights a pending turn_on just switched
@@ -362,6 +372,7 @@ class RoomCommander:
             first_error = first_error or error
         if later:
             # Not waited for, so the caller is not held up by the pause.
+            # After the color's half of the transition.
             delay = (
                 max(params.get(ATTR_TRANSITION, 0) for _, params in later)
                 + SEPARATE_COMMANDS_PAUSE_SECONDS
@@ -370,8 +381,10 @@ class RoomCommander:
                 self._async_send_later(later, delay, member_params, context),
                 "light_buddy_separate_commands",
             )
-            self._later.add(task)
-            task.add_done_callback(self._later.discard)
+            self._later[task] = frozenset(
+                entity_id for entity_ids, _ in later for entity_id in entity_ids
+            )
+            task.add_done_callback(lambda task: self._later.pop(task, None))
         if first_error is not None:
             raise first_error
 
@@ -384,9 +397,16 @@ class RoomCommander:
     ) -> None:
         await asyncio.sleep(delay)
         for entity_ids, call_params in calls:
-            await self._async_call(
-                SERVICE_TURN_ON, entity_ids, call_params, member_params, context
-            )
+            # A light turned off meanwhile, e.g. by a wall switch, stays off.
+            if on := [
+                entity_id
+                for entity_id in entity_ids
+                if (state := self.hass.states.get(entity_id)) is not None
+                and state.state == STATE_ON
+            ]:
+                await self._async_call(
+                    SERVICE_TURN_ON, on, call_params, member_params, context
+                )
 
     async def _async_call(
         self,

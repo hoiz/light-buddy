@@ -287,13 +287,22 @@ class RoomManager:
 
     @callback
     def async_apply_options(self) -> None:
-        """Follow a changed schedule and settings, without reloading."""
-        self.points = points_from_options(self.entry.options.get(CONF_SCHEDULE))
-        self.settings = ScheduleSettings.from_options(self.entry.options)
+        """Follow a changed schedule and settings, without reloading.
+
+        Options the entities store themselves, e.g. offsets, change neither.
+        """
+        points = points_from_options(self.entry.options.get(CONF_SCHEDULE))
+        settings = ScheduleSettings.from_options(self.entry.options)
+        if points == self.points and settings == self.settings:
+            return
+        separate_changed = settings.separate_commands != self.settings.separate_commands
+        self.points, self.settings = points, settings
         for automation in self._automations.values():
-            automation.async_set_points(self.points)
-            automation.async_set_settings(self.settings)
-        self._async_update_separate_lights()
+            automation.async_set_points(points)
+            automation.async_set_settings(settings)
+            automation.async_apply_soon()
+        if separate_changed:
+            self._async_update_separate_lights()
 
     @callback
     def _async_update_separate_lights(self) -> None:
@@ -584,5 +593,11 @@ def _light_service_filter(event_data: Mapping[str, Any]) -> bool:
 
 @callback
 def _device_event_filter(event_data: dr.EventDeviceRegistryUpdatedData) -> bool:
-    """Devices matter when they are added, removed or moved to another area."""
-    return event_data["action"] != "update" or "area_id" in event_data["changes"]
+    """Devices matter when added, removed, moved or their maker is known.
+
+    The maker tells IKEA lights for separate commands.
+    """
+    return event_data["action"] != "update" or not {
+        "area_id",
+        "manufacturer",
+    }.isdisjoint(event_data["changes"])

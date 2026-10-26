@@ -18,6 +18,8 @@ from homeassistant.helpers import selector
 from .automation import ScheduleSettings
 from .const import (
     CONF_AUTO_RESUME_MINUTES,
+    CONF_DISCO_INTERVAL,
+    CONF_DISCO_PALETTE,
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
     CONF_KELVIN,
@@ -28,11 +30,13 @@ from .const import (
     CONF_TIME,
     CONF_TRANSITION,
     CONF_WEEKDAYS,
+    DISCO_MIN_INTERVAL,
     DOMAIN,
     SEPARATE_ALL,
     SEPARATE_IKEA,
     SEPARATE_OFF,
 )
+from .disco import PALETTES, DiscoSettings
 from .schedule import (
     DEFAULT_SCHEDULE,
     SchedulePoint,
@@ -263,10 +267,13 @@ class LightBuddyOptionsFlow(OptionsFlow):
                             user_input[CONF_AUTO_RESUME_MINUTES]
                         ),
                         CONF_SEPARATE_COMMANDS: user_input[CONF_SEPARATE_COMMANDS],
+                        CONF_DISCO_INTERVAL: int(user_input[CONF_DISCO_INTERVAL]),
+                        CONF_DISCO_PALETTE: user_input[CONF_DISCO_PALETTE],
                     },
                 }
             )
         settings = ScheduleSettings.from_options(self.config_entry.options)
+        disco = DiscoSettings.from_options(self.config_entry.options)
         return self.async_show_form(
             step_id="settings",
             data_schema=self.add_suggested_values_to_schema(
@@ -276,6 +283,8 @@ class LightBuddyOptionsFlow(OptionsFlow):
                     CONF_TRANSITION: settings.transition,
                     CONF_AUTO_RESUME_MINUTES: settings.auto_resume_minutes,
                     CONF_SEPARATE_COMMANDS: settings.separate_commands,
+                    CONF_DISCO_INTERVAL: disco.interval,
+                    CONF_DISCO_PALETTE: disco.palette,
                 },
             ),
         )
@@ -375,6 +384,20 @@ SETTINGS_SCHEMA = probatio.Schema(
             selector.SelectSelectorConfig(
                 options=[SEPARATE_OFF, SEPARATE_IKEA, SEPARATE_ALL],
                 translation_key=CONF_SEPARATE_COMMANDS,
+            )
+        ),
+        probatio.Required(CONF_DISCO_INTERVAL): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=DISCO_MIN_INTERVAL,
+                max=60,
+                step=1,
+                unit_of_measurement="s",
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        ),
+        probatio.Required(CONF_DISCO_PALETTE): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(PALETTES), translation_key=CONF_DISCO_PALETTE
             )
         ),
     }

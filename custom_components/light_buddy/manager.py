@@ -22,7 +22,7 @@ from homeassistant.const import (
     STATE_ON,
     Platform,
 )
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import (
     area_registry as ar,
     device_registry as dr,
@@ -46,6 +46,7 @@ from .const import (
     SEPARATE_ALL,
     SEPARATE_IKEA,
 )
+from .disco import DiscoSettings
 from .membership import async_resolve_rooms
 from .offset import ColorTempOffset
 from .schedule import points_from_options
@@ -64,6 +65,10 @@ type ManagedEntity = RoomLight | RoomEntity | LightOffsetEntity
 REFRESH_FIELDS = frozenset(
     {"area_id", "capabilities", "device_id", "disabled_by", "name", "original_name"}
 )
+
+
+# Of the one sensor all rooms share.
+TARGET_SENSOR_UNIQUE_ID = "target_color_temp"
 
 
 class RoomManager:
@@ -87,6 +92,7 @@ class RoomManager:
         self.separate_lights: set[str] = set()
         self.points = points_from_options(entry.options.get(CONF_SCHEDULE))
         self.settings = ScheduleSettings.from_options(entry.options)
+        self.disco_settings = DiscoSettings.from_options(entry.options)
         self._exclusions = _exclusions(entry.options)
         self._lights: dict[str, RoomLight] = {}
         self._light_rooms: dict[str, str] = {}
@@ -94,6 +100,7 @@ class RoomManager:
         self._offset_entities: dict[str, list[LightOffsetEntity]] = {}
         self._automations: dict[str, RoomAutomation] = {}
         self._room_entities: dict[str, list[RoomEntity]] = {}
+        self._schedule_listeners: list[CALLBACK_TYPE] = []
         self._debouncer = Debouncer(
             hass,
             _LOGGER,
@@ -211,18 +218,22 @@ class RoomManager:
         registry_ids: Collection[str],
     ) -> None:
         """Remove the entities of areas and lights that are gone."""
-        wanted = {
-            f"{area_id}{suffix}"
-            for area_id in area_ids
-            for suffix in (
-                "",
-                *(cls.UNIQUE_ID_SUFFIX for cls in _room_entity_classes()),
-            )
-        } | {
-            f"{registry_id}{cls.UNIQUE_ID_SUFFIX}"
-            for registry_id in registry_ids
-            for cls in offset_entity_classes()
-        }
+        wanted = (
+            {
+                f"{area_id}{suffix}"
+                for area_id in area_ids
+                for suffix in (
+                    "",
+                    *(cls.UNIQUE_ID_SUFFIX for cls in _room_entity_classes()),
+                )
+            }
+            | {
+                f"{registry_id}{cls.UNIQUE_ID_SUFFIX}"
+                for registry_id in registry_ids
+                for cls in offset_entity_classes()
+            }
+            | {TARGET_SENSOR_UNIQUE_ID}
+        )
         for registry_entry in er.async_entries_for_config_entry(
             entity_registry, self.entry.entry_id
         ):
@@ -255,6 +266,7 @@ class RoomManager:
                 )
                 automation.async_set_points(self.points)
                 automation.async_set_settings(self.settings)
+                automation.async_set_disco_settings(self.disco_settings)
                 self._automations[area_id] = automation
                 automation.async_start()
 
@@ -270,6 +282,11 @@ class RoomManager:
         """
         points = points_from_options(self.entry.options.get(CONF_SCHEDULE))
         settings = ScheduleSettings.from_options(self.entry.options)
+        disco_settings = DiscoSettings.from_options(self.entry.options)
+        if disco_settings != self.disco_settings:
+            self.disco_settings = disco_settings
+            for automation in self._automations.values():
+                automation.async_set_disco_settings(disco_settings)
         if points == self.points and settings == self.settings:
             return
         separate_changed = settings.separate_commands != self.settings.separate_commands
@@ -279,7 +296,11 @@ class RoomManager:
             or settings.threshold != self.settings.threshold
             or settings.transition != self.settings.transition
         )
+        points_changed = points != self.points
         self.points, self.settings = points, settings
+        if points_changed:
+            for update in list(self._schedule_listeners):
+                update()
         for automation in self._automations.values():
             automation.async_set_points(points)
             automation.async_set_settings(settings)
@@ -287,6 +308,12 @@ class RoomManager:
                 automation.async_apply_soon()
         if separate_changed:
             self._async_update_separate_lights()
+
+    @callback
+    def async_add_schedule_listener(self, update: CALLBACK_TYPE) -> CALLBACK_TYPE:
+        """Call update when the schedule changes."""
+        self._schedule_listeners.append(update)
+        return lambda: self._schedule_listeners.remove(update)
 
     @callback
     def _async_update_separate_lights(self) -> None:
@@ -507,11 +534,9 @@ class RoomManager:
 def _room_entity_classes() -> tuple[type[RoomEntity], ...]:
     """Return the entities each room gets next to its room light."""
     # Imported here, as the platforms import this module.
-    from .button import ResumeScheduleButton
-    from .sensor import TargetColorTempSensor
-    from .switch import ScheduleSwitch
+    from .switch import DiscoSwitch, ScheduleSwitch
 
-    return (ScheduleSwitch, ResumeScheduleButton, TargetColorTempSensor)
+    return (ScheduleSwitch, DiscoSwitch)
 
 
 def offset_entity_classes() -> tuple[type[LightOffsetEntity], ...]:

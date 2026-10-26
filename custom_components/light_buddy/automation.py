@@ -28,6 +28,7 @@ from .const import (
     TRANSITION_SCHEDULE,
     TRANSITION_TURN_ON,
 )
+from .disco import DiscoSettings, RoomDisco
 from .room import COLOR_GROUP_ATTRS
 from .schedule import DEFAULT_SCHEDULE, SchedulePoint, Target, target_at
 
@@ -128,6 +129,7 @@ class RoomAutomation:
         self.paused_since: dt.datetime | None = None
         self._paused_at = 0.0
         self._unsub_auto_resume: CALLBACK_TYPE | None = None
+        self.disco = RoomDisco(self)
 
     @property
     def light(self) -> RoomLight | None:
@@ -137,8 +139,11 @@ class RoomAutomation:
 
     @property
     def active(self) -> bool:
-        """Return True if the schedule controls the room right now."""
-        return self.enabled and self.target is not None
+        """Return True if the schedule controls the room right now.
+
+        Not during disco, which sets the colors itself.
+        """
+        return self.enabled and self.target is not None and not self.disco.running
 
     @callback
     def async_start(self) -> None:
@@ -159,7 +164,7 @@ class RoomAutomation:
                     self.hass, self._async_tick_later, SCHEDULE_INTERVAL
                 )
             )
-            self._tick = self._async_track(self._async_tick(dt_util.utcnow()))
+            self._tick = self.async_track(self._async_tick(dt_util.utcnow()))
 
         self._unsubs.append(async_call_later(self.hass, offset, _async_start_interval))
 
@@ -175,6 +180,7 @@ class RoomAutomation:
             self._unsub_turned_on = None
         self._turned_on.clear()
         self._async_cancel_auto_resume()
+        self.disco.async_cancel()
 
     @callback
     def async_add_listener(self, update: CALLBACK_TYPE) -> CALLBACK_TYPE:
@@ -187,6 +193,11 @@ class RoomAutomation:
         """Follow another schedule from now on."""
         self.points = tuple(points)
         self._async_update_target()
+
+    @callback
+    def async_set_disco_settings(self, settings: DiscoSettings) -> None:
+        """Use other disco settings from the next color on."""
+        self.disco.async_set_settings(settings)
 
     @callback
     def async_set_settings(self, settings: ScheduleSettings) -> None:
@@ -205,10 +216,10 @@ class RoomAutomation:
     @callback
     def async_apply_soon(self) -> None:
         """Apply the schedule now, e.g. after it was changed."""
-        self._async_track(self._async_apply())
+        self.async_track(self._async_apply())
 
     @callback
-    def _async_track(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
+    def async_track(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
         """Run a task that stopping the automation cancels."""
         task = self.hass.async_create_task(coro)
         self._tasks.add(task)
@@ -216,10 +227,15 @@ class RoomAutomation:
         return task
 
     async def async_set_enabled(self, enabled: bool) -> None:
-        """Turn the schedule on or off, and apply it right away when on."""
+        """Turn the schedule on or off, and apply it right away when on.
+
+        Either way, a pause from changes by hand ends: turned off, the room
+        stays off until turned on again, and turned on, it follows again.
+        """
+        self._async_clear_pause()
         self.enabled = enabled
         self._store_enabled(self.area_id, enabled)
-        self._async_notify()
+        self.async_notify()
         if enabled:
             self._async_update_target()
             await self._async_apply()
@@ -239,7 +255,7 @@ class RoomAutomation:
             return
         self.paused = True
         self.paused_since = dt_util.utcnow()
-        self._async_notify()
+        self.async_notify()
 
     @callback
     def _async_start_auto_resume(self) -> None:
@@ -260,14 +276,21 @@ class RoomAutomation:
 
     @callback
     def async_room_off(self) -> None:
-        """Forget manual changes once all lights of the room are off."""
+        """Forget manual changes once all lights of the room are off.
+
+        Disco ends, too, and the lights stay off. Not while disco starts,
+        when the room may look off for a moment.
+        """
+        if self.disco.starting:
+            return
         self._async_clear_pause()
+        self.disco.async_room_off()
 
     @callback
     def _async_auto_resume_later(self, _now: dt.datetime) -> None:
         # Cleared here, a timer started before the task runs stays known.
         self._unsub_auto_resume = None
-        self._async_track(self.async_resume())
+        self.async_track(self.async_resume())
 
     @callback
     def _async_tick_later(self, now: dt.datetime) -> None:
@@ -275,7 +298,7 @@ class RoomAutomation:
         # lights slow to answer, a tick still running skips the next one.
         if self._tick is not None and not self._tick.done():
             return
-        self._tick = self._async_track(self._async_tick(now))
+        self._tick = self.async_track(self._async_tick(now))
 
     @callback
     def _async_clear_pause(self) -> None:
@@ -287,7 +310,7 @@ class RoomAutomation:
         if self.paused:
             self.paused = False
             self.paused_since = None
-            self._async_notify()
+            self.async_notify()
 
     @callback
     def _async_cancel_auto_resume(self) -> None:
@@ -301,7 +324,10 @@ class RoomAutomation:
 
         Covers lights turned on directly, by a wall switch, or by others.
         Lights turning on together, e.g. by a wall switch, get one command.
+        Not during disco, whose next color reaches them.
         """
+        if self.disco.running:
+            return
         self._turned_on.add(entity_id)
         if self._unsub_turned_on is None:
             self._unsub_turned_on = async_call_later(
@@ -316,7 +342,7 @@ class RoomAutomation:
         self._unsub_turned_on = None
         members = list(self._turned_on)
         self._turned_on.clear()
-        self._async_track(self._async_apply(TRANSITION_TURN_ON, members))
+        self.async_track(self._async_apply(TRANSITION_TURN_ON, members))
 
     async def _async_tick(self, _now: dt.datetime) -> None:
         # In case the room turned off while a turn on was still waiting. A
@@ -360,12 +386,12 @@ class RoomAutomation:
         target = target_at(self.points, dt_util.now(), self._sun_time)
         if target != self.target:
             self.target = target
-            self._async_notify()
+            self.async_notify()
 
     def _sun_time(self, event: str, day: dt.date) -> dt.datetime | None:
         return get_astral_event_date(self.hass, event, day)
 
     @callback
-    def _async_notify(self) -> None:
+    def async_notify(self) -> None:
         for update in list(self._listeners):
             update()

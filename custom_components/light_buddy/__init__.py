@@ -11,7 +11,6 @@ from .manager import LightBuddyConfigEntry, RoomManager, offset_entity_classes
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
-    Platform.BUTTON,
     Platform.LIGHT,
     Platform.NUMBER,
     Platform.SELECT,

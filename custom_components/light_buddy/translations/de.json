@@ -78,13 +78,17 @@
           "threshold": "Kleinste Änderung",
           "transition": "Übergang",
           "auto_resume_minutes": "Fortsetzen nach",
-          "separate_commands": "Helligkeit getrennt für IKEA-Lampen"
+          "separate_commands": "Helligkeit getrennt für IKEA-Lampen",
+          "disco_interval": "Disco-Tempo",
+          "disco_palette": "Disco-Palette"
         },
         "data_description": {
           "threshold": "Eingeschaltete Lampen bekommen erst eine neue Farbtemperatur, wenn der Zielwert mindestens so weit abweicht.",
           "transition": "Für die Anpassungen des Zeitplans jede Minute. Kurz halten: IKEA-Lampen ignorieren während eines Übergangs andere Befehle, sogar das Ausschalten.",
-          "auto_resume_minutes": "Manuelle Änderungen enden nach dieser Zeit von selbst. 0 behält sie, bis der Raum aus ist.",
-          "separate_commands": "Manche Lampen, vor allem von IKEA, ändern Helligkeit und Farbtemperatur nicht sauber gleichzeitig, z. B. beim Einschalten eines Raums mit einer Helligkeit. Sie bekommen dann zuerst die Farbtemperatur und eine halbe Sekunde später die Helligkeit."
+          "auto_resume_minutes": "Nach einer manuellen Änderung schaltet sich der Zeitplan-Schalter des Raums nach dieser Zeit von selbst wieder ein. 0 wartet, bis der Raum aus ist.",
+          "separate_commands": "Manche Lampen, vor allem von IKEA, ändern Helligkeit und Farbtemperatur nicht sauber gleichzeitig, z. B. beim Einschalten eines Raums mit einer Helligkeit. Sie bekommen dann zuerst die Farbtemperatur und eine halbe Sekunde später die Helligkeit.",
+          "disco_interval": "Sekunden bis zur nächsten Farbe. Jeder Farbwechsel sendet einen Befehl pro Farbe, sehr kurze Zeiten belasten also das Zigbee-Netz.",
+          "disco_palette": "Die Farben, durch die der Disco-Modus wechselt. Jede Lampe zeigt eine andere."
         }
       }
     },
@@ -125,25 +129,15 @@
     },
     "switch": {
       "schedule": {
-        "name": "Zeitplan {area}",
-        "state_attributes": {
-          "paused": {
-            "name": "Pausiert"
-          },
-          "paused_since": {
-            "name": "Pausiert seit"
-          }
-        }
+        "name": "Zeitplan {area}"
+      },
+      "disco": {
+        "name": "Disco {area}"
       }
     },
     "sensor": {
       "target_color_temperature": {
-        "name": "Ziel-Farbtemperatur {area}"
-      }
-    },
-    "button": {
-      "resume_schedule": {
-        "name": "Zeitplan fortsetzen {area}"
+        "name": "Ziel-Farbtemperatur"
       }
     }
   },
@@ -165,6 +159,19 @@
         "ikea": "Nur IKEA-Lampen",
         "all": "Alle Lampen"
       }
+    },
+    "disco_palette": {
+      "options": {
+        "rainbow": "Regenbogen",
+        "party": "Party",
+        "fire": "Feuer",
+        "ocean": "Ozean"
+      }
+    }
+  },
+  "exceptions": {
+    "no_color_lights": {
+      "message": "Keine Lampe in diesem Raum unterstützt Farben."
     }
   }
 }

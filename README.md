@@ -8,7 +8,7 @@ A custom integration for Home Assistant: **one light per room**, without maintai
 
 For every area with at least one light, Light Buddy creates a light entity, e.g. `light.all_living` named "All lights in Living". It switches and dims all lights of the area together and works in a regular dashboard tile with a brightness slider.
 
-On top of that, there is a color temperature offset per light and a color temperature schedule. Planned: a disco mode.
+On top of that, there is a color temperature offset per light, a color temperature schedule and a disco mode.
 
 ## Requirements
 
@@ -76,11 +76,12 @@ Every room follows a color temperature schedule. Between the points, the color t
 | 21:00 | 2700 K |
 | 22:30 | 2200 K |
 
-Every room has:
+Every room has a **Schedule** switch (`switch.schedule_<area>`). It is on while the room follows the schedule:
 
-- **Schedule** (`switch.schedule_<area>`): turns the schedule on or off for the room. The state is kept across restarts.
-- **Target color temperature** (`sensor.target_color_temperature_<area>`): the current target, e.g. for your own automations.
-- **Resume schedule** (`button.resume_schedule_<area>`): see "Manual changes".
+- Turn it off to stop the schedule in the room. It stays off, also across restarts, until you turn it on again.
+- A manual change turns it off for a while, see "Manual changes".
+
+**Target color temperature** (`sensor.target_color_temperature`) shows the schedule's current value, the same for all rooms, e.g. for your own automations.
 
 How the schedule behaves:
 
@@ -100,7 +101,7 @@ Settings → Devices & services → Light Buddy → **Configure** → **Schedule
 - **Add point** / **Edit point**: time, color temperature and optional weekdays. Without weekdays, a point applies every day; with them you can, for example, set a later morning on weekends.
 - **Delete points**: at least one point has to stay.
 - **Reset to default**: the daylight curve from above.
-- **Save** stores all changes. They apply right away, without a restart; running pauses continue.
+- **Save** stores all changes. They apply right away, without a restart; Schedule switches turned off by manual changes stay off.
 
 Between two points, the color temperature changes evenly in mired, matching how the eye perceives color temperature.
 
@@ -112,12 +113,12 @@ Light Buddy → **Configure** → **Settings**:
 |---|---|---|
 | Smallest change | 50 K | Lights that are on only get a new color temperature once the target differs at least this much. |
 | Transition | 2 s | For the updates every minute. IKEA lights ignore other commands during a transition, so keep it short. |
-| Resume after | 0 (never) | Manual changes end by themselves after this time. |
+| Resume after | 0 (never) | After a manual change, the Schedule switch turns on again by itself after this time. |
 | Separate brightness for IKEA lights | Off | For lights that do not change brightness and color temperature together cleanly, e.g. when turning on a room with a brightness: the color temperature first, the brightness half a second after the transition. "IKEA lights only" recognizes them by the device's manufacturer. |
 
 ## Manual changes
 
-When you set a color temperature or color by hand, the schedule leaves the color in that room alone. Dimming is no such change: the brightness is yours anyway, and the color temperature keeps following the schedule.
+When you set a color temperature or color by hand, the schedule leaves the color in that room alone: the room's **Schedule** switch turns off. Dimming is no such change: the brightness is yours anyway, and the color temperature keeps following the schedule.
 
 These count as manual:
 
@@ -127,13 +128,39 @@ These count as manual:
 
 Turning on without values is no manual change.
 
-The pause ends:
+The switch turns on again by itself:
 
 - when all lights in the room are off; the next turn on follows the schedule again;
-- with **Resume schedule** (`button.resume_schedule_<area>`); the schedule is applied again right away;
 - optionally after the time set in **Resume after**.
 
-Whether the schedule is paused right now is shown by the **Schedule** switch in its attributes `paused` and `paused_since`.
+Turning it on yourself applies the schedule again right away.
+
+## Disco
+
+Every room has a **Disco** switch (`switch.disco_<area>`). While it is on:
+
+- **Colored lights** cycle through a palette, each light showing a different color. Lights that were off turn on with the room's brightness, or at full brightness if the room was off.
+- **White lights** (and other lights without color) turn off.
+- **Brightness** can still be changed through the room light; it only reaches the colored lights.
+- **The schedule** waits and sends nothing.
+
+Turning disco off restores what the lights showed before, including the white lights. Lights that followed the schedule get its current color temperature right away.
+
+Disco also ends:
+
+- when the room is turned off; the lights stay off;
+- when you set a color or color temperature through the room light; the lights keep it, and the Schedule switch turns off as for any manual change.
+
+Turning disco off waits for a running fade to finish, at most about 1.5 s. Lights switched on or off by hand during disco, against what disco did with them, keep that: a white light turned on at the wall stays on.
+
+After a restart of Home Assistant, or a reload of Light Buddy, disco is off and the lights stay as they are.
+
+Speed and palette are set for all rooms under **Configure** → **Settings**:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| Disco speed | 4 s | Seconds until the next color, between 2 and 60. Each color fades in over 1 s, kept short because IKEA lights ignore commands while fading. Every change sends one command per color, so very short times load the Zigbee network. |
+| Disco palette | Rainbow | Rainbow, Party, Fire or Ocean. |
 
 ## Behavior
 

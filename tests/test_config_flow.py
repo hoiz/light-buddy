@@ -233,6 +233,8 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
         "transition": 2,
         "auto_resume_minutes": 0,
         "separate_commands": "off",
+        "disco_interval": 4,
+        "disco_palette": "rainbow",
     }
 
     result = await hass.config_entries.options.async_configure(
@@ -242,6 +244,8 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
             "transition": 1.5,
             "auto_resume_minutes": 30,
             "separate_commands": "ikea",
+            "disco_interval": 2,
+            "disco_palette": "party",
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -250,4 +254,6 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
         "transition": 1.5,
         "auto_resume_minutes": 30,
         "separate_commands": "ikea",
+        "disco_interval": 2,
+        "disco_palette": "party",
     }

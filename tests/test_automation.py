@@ -19,7 +19,7 @@ from .conftest import COLOR_LIGHT, WHITE_LIGHT
 
 ROOM = "light.all_wohnzimmer"
 SCHEDULE = "switch.schedule_wohnzimmer"
-TARGET = "sensor.target_color_temperature_wohnzimmer"
+TARGET = "sensor.target_color_temperature"
 # Coldest point of the default schedule, 12:30 in the test time zone.
 NOON = "2026-10-26 12:30:00-07:00"
 ON_CT = {"color_mode": ColorMode.COLOR_TEMP, "brightness": 100}
@@ -391,3 +391,23 @@ async def test_auto_resume_counts_from_last_change(
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
     await hass.async_block_till_done()
     assert not automation.paused
+
+
+async def test_target_sensor_follows_schedule_change(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A saved schedule shows in the sensor at once, without a tick."""
+    add_light("lamp", area="Wohnzimmer")
+    entry = await setup_integration(schedule=True)
+    assert hass.states.get(TARGET).state == "5000"
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            "schedule": [{"time": "00:00", "kelvin": 3300, "weekdays": None}],
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get(TARGET).state == "3300"

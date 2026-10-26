@@ -307,6 +307,12 @@ class RoomCommander:
         """
         await self._async_send(SERVICE_TURN_ON, member_params, Context())
 
+    async def async_turn_off_now(self, members: Iterable[str]) -> None:
+        """Turn off lights at once, apart from throttling, like async_send_now."""
+        await self._async_send(
+            SERVICE_TURN_OFF, {entity_id: {} for entity_id in members}, Context()
+        )
+
     @callback
     def async_cancel(self) -> None:
         """Drop pending commands."""

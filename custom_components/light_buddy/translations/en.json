@@ -78,13 +78,17 @@
           "threshold": "Smallest change",
           "transition": "Transition",
           "auto_resume_minutes": "Resume after",
-          "separate_commands": "Separate brightness for IKEA lights"
+          "separate_commands": "Separate brightness for IKEA lights",
+          "disco_interval": "Disco speed",
+          "disco_palette": "Disco palette"
         },
         "data_description": {
           "threshold": "Lights that are on only get a new color temperature once the target differs at least this much.",
           "transition": "For the schedule's updates every minute. Keep it short: IKEA lights ignore other commands, even turning off, during a transition.",
-          "auto_resume_minutes": "Manual changes end by themselves after this time. 0 keeps them until the room is off.",
-          "separate_commands": "Some lights, IKEA ones in particular, do not change brightness and color temperature together cleanly, e.g. when turning on a room with a brightness. They then get the color temperature first and the brightness half a second later."
+          "auto_resume_minutes": "After a manual change, the room's Schedule switch turns on again by itself after this time. 0 waits until the room is off.",
+          "separate_commands": "Some lights, IKEA ones in particular, do not change brightness and color temperature together cleanly, e.g. when turning on a room with a brightness. They then get the color temperature first and the brightness half a second later.",
+          "disco_interval": "Seconds until the next color. Each color change sends one command per color, so very short times load the Zigbee network.",
+          "disco_palette": "The colors the disco mode cycles through. Each light shows a different one."
         }
       }
     },
@@ -125,25 +129,15 @@
     },
     "switch": {
       "schedule": {
-        "name": "Schedule {area}",
-        "state_attributes": {
-          "paused": {
-            "name": "Paused"
-          },
-          "paused_since": {
-            "name": "Paused since"
-          }
-        }
+        "name": "Schedule {area}"
+      },
+      "disco": {
+        "name": "Disco {area}"
       }
     },
     "sensor": {
       "target_color_temperature": {
-        "name": "Target color temperature {area}"
-      }
-    },
-    "button": {
-      "resume_schedule": {
-        "name": "Resume schedule {area}"
+        "name": "Target color temperature"
       }
     }
   },
@@ -165,6 +159,19 @@
         "ikea": "IKEA lights only",
         "all": "All lights"
       }
+    },
+    "disco_palette": {
+      "options": {
+        "rainbow": "Rainbow",
+        "party": "Party",
+        "fire": "Fire",
+        "ocean": "Ocean"
+      }
+    }
+  },
+  "exceptions": {
+    "no_color_lights": {
+      "message": "No light in this room supports colors."
     }
   }
 }

@@ -15,8 +15,12 @@ from homeassistant.components.light import (
     ATTR_HS_COLOR,
     ATTR_MAX_COLOR_TEMP_KELVIN,
     ATTR_MIN_COLOR_TEMP_KELVIN,
+    ATTR_RGB_COLOR,
+    ATTR_RGBW_COLOR,
+    ATTR_RGBWW_COLOR,
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_TRANSITION,
+    ATTR_XY_COLOR,
     COLOR_MODES_COLOR,
     DOMAIN as LIGHT_DOMAIN,
     ColorMode,
@@ -55,6 +59,7 @@ from .const import (
     MANUAL_COLOR_TEMP_THRESHOLD_KELVIN,
     TRANSITION_GRACE_SECONDS,
 )
+from .disco import restored_params
 from .manager import LightBuddyConfigEntry
 from .offset import ColorTempOffset, same_color_temp
 from .room import (
@@ -74,6 +79,15 @@ PARALLEL_UPDATES = 0
 TURNING_OFF_GRACE = 3
 # A light reporting on this soon after it went off is not treated as turned on.
 LIGHT_OFF_GRACE = 5
+
+# The attribute that restores a light's color, per color mode.
+RESTORED_COLOR_ATTRS = {
+    ColorMode.HS: ATTR_HS_COLOR,
+    ColorMode.XY: ATTR_XY_COLOR,
+    ColorMode.RGB: ATTR_RGB_COLOR,
+    ColorMode.RGBW: ATTR_RGBW_COLOR,
+    ColorMode.RGBWW: ATTR_RGBWW_COLOR,
+}
 
 FORWARDED_FEATURES = (
     LightEntityFeature.EFFECT | LightEntityFeature.FLASH | LightEntityFeature.TRANSITION
@@ -211,6 +225,15 @@ class RoomLight(LightEntity):
             automation.async_room_off()
         now = self.hass.loop.time()
         entity_id = new_state.entity_id
+        if (
+            automation is not None
+            and commander is not None
+            and {old_state.state, new_state.state} == {STATE_ON, STATE_OFF}
+            and not commander.is_own_context(new_state.context)
+        ):
+            automation.disco.async_light_switched(
+                entity_id, new_state.state == STATE_ON
+            )
         if old_state.state == STATE_ON and new_state.state != STATE_ON:
             self._turned_off_at[entity_id] = now
             self._manual_color.pop(entity_id, None)
@@ -221,6 +244,8 @@ class RoomLight(LightEntity):
             and commander is not None
             and old_state.state == STATE_ON
             and new_state.state == STATE_ON
+            # Disco sets the colors, and leaves the schedule as it was.
+            and not automation.disco.running
             and not commander.is_own_context(new_state.context)
             # Lights report their values while the room fades out, too.
             and not self._turning_off(now)
@@ -322,6 +347,14 @@ class RoomLight(LightEntity):
             members = off
         overrides = None
         automation = self._automation
+        if automation is not None and automation.disco.running:
+            if sets_color(kwargs):
+                # A color of its own ends disco, the lights keep it.
+                await automation.disco.async_stop(restore=False)
+            else:
+                # White lights stay off during disco.
+                colored = set(self.color_members)
+                members = [entity_id for entity_id in members if entity_id in colored]
         if automation is not None and sets_color(kwargs):
             automation.async_mark_manual()
         if (
@@ -350,8 +383,10 @@ class RoomLight(LightEntity):
 
     @override
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn off all lights of the room."""
+        """Turn off all lights of the room. Disco ends, the lights stay off."""
         assert self._commander is not None
+        if self._automation is not None:
+            await self._automation.disco.async_stop(restore=False)
         params = turn_off_params(kwargs)
         self._turning_off_until = (
             self.hass.loop.time() + params.get(ATTR_TRANSITION, 0) + TURNING_OFF_GRACE
@@ -402,6 +437,124 @@ class RoomLight(LightEntity):
             member_params[entity_id] = params
         if member_params:
             await self._commander.async_send_now(member_params)
+
+    @property
+    def color_members(self) -> list[str]:
+        """Return the lights of this room that can show colors, sorted."""
+        return sorted(
+            entity_id
+            for entity_id in self._members
+            if (state := self.hass.states.get(entity_id)) is not None
+            and color_supported(state.attributes.get(ATTR_SUPPORTED_COLOR_MODES))
+        )
+
+    @callback
+    def async_snapshot(self) -> dict[str, dict[str, Any] | None]:
+        """Return the params that bring each light back to what it shows.
+
+        None for lights that are off. Color temperatures are without offset,
+        which sending applies again. Lights that are unavailable are left out.
+        """
+        snapshot: dict[str, dict[str, Any] | None] = {}
+        for entity_id in self._members:
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state not in (STATE_ON, STATE_OFF):
+                continue
+            if state.state == STATE_OFF:
+                snapshot[entity_id] = None
+                continue
+            attributes = state.attributes
+            params: dict[str, Any] = {}
+            if (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None:
+                params[ATTR_BRIGHTNESS] = brightness
+            color_mode = attributes.get(ATTR_COLOR_MODE)
+            if color_mode == ColorMode.COLOR_TEMP:
+                if (kelvin := self._requested_color_temp(state)) is not None:
+                    params[ATTR_COLOR_TEMP_KELVIN] = round(kelvin)
+            elif (attr := RESTORED_COLOR_ATTRS.get(color_mode)) is not None and (
+                value := attributes.get(attr)
+            ) is not None:
+                params[attr] = value
+            snapshot[entity_id] = params
+        return snapshot
+
+    async def async_disco_start(
+        self, colors: Mapping[str, tuple[float, float]]
+    ) -> None:
+        """Give the colored lights their first color, and turn the others off.
+
+        Lights that are off turn on with the room's brightness, or full
+        brightness if the room is off.
+        """
+        assert self._commander is not None
+        brightness = self.brightness if self.is_on and self.brightness else 255
+        member_params: MemberParams = {}
+        for entity_id, hs_color in colors.items():
+            params: dict[str, Any] = {ATTR_HS_COLOR: hs_color}
+            if (
+                state := self.hass.states.get(entity_id)
+            ) is None or state.state != STATE_ON:
+                params[ATTR_BRIGHTNESS] = brightness
+            member_params[entity_id] = params
+        # Colored lights first, so the room does not look off in between.
+        await self._commander.async_send_now(member_params)
+        if white := [
+            entity_id
+            for entity_id in self._members
+            if entity_id not in colors
+            and (state := self.hass.states.get(entity_id)) is not None
+            and state.state == STATE_ON
+        ]:
+            await self._commander.async_turn_off_now(white)
+
+    async def async_disco_step(
+        self, colors: Mapping[str, tuple[float, float]], transition: float
+    ) -> None:
+        """Give the colored lights that are on their next color.
+
+        Lights turned off meanwhile, e.g. at their own switch, stay off.
+        """
+        assert self._commander is not None
+        member_params: MemberParams = {}
+        for entity_id, hs_color in colors.items():
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state != STATE_ON:
+                continue
+            params: dict[str, Any] = {ATTR_HS_COLOR: hs_color}
+            if transition and state.attributes.get(ATTR_SUPPORTED_FEATURES, 0) & (
+                LightEntityFeature.TRANSITION
+            ):
+                params[ATTR_TRANSITION] = transition
+            member_params[entity_id] = params
+        if member_params:
+            await self._commander.async_send_now(member_params)
+
+    async def async_restore(
+        self,
+        snapshot: Mapping[str, dict[str, Any] | None],
+        color_temp: float | None,
+    ) -> None:
+        """Bring the lights back to a snapshot.
+
+        With a color temperature, lights that showed one get it instead, so
+        lights following the schedule get its current target.
+        """
+        assert self._commander is not None
+        on: MemberParams = {}
+        off: list[str] = []
+        for entity_id, params in snapshot.items():
+            if entity_id not in self._members:
+                continue
+            if params is None:
+                off.append(entity_id)
+            else:
+                on[entity_id] = restored_params(params, color_temp)
+        try:
+            if on:
+                await self._commander.async_send_now(on)
+        finally:
+            if off:
+                await self._commander.async_turn_off_now(off)
 
     @callback
     def _async_update_state(self) -> None:

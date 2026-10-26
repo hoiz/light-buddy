@@ -26,6 +26,8 @@ CONF_THRESHOLD: Final = "threshold"
 CONF_TRANSITION: Final = "transition"
 CONF_AUTO_RESUME_MINUTES: Final = "auto_resume_minutes"
 CONF_SEPARATE_COMMANDS: Final = "separate_commands"
+CONF_DISCO_INTERVAL: Final = "disco_interval"
+CONF_DISCO_PALETTE: Final = "disco_palette"
 
 # Which lights get brightness and color as separate commands.
 SEPARATE_OFF: Final = "off"
@@ -61,3 +63,9 @@ TRANSITION_GRACE_SECONDS: Final = 2
 # Between the color temperature and the brightness command of lights that
 # get them separately, after the transition.
 SEPARATE_COMMANDS_PAUSE_SECONDS: Final = 0.5
+
+# Seconds between two colors of the disco mode, and its palette. Settings,
+# these are their defaults. Each step sends one call per color.
+DISCO_INTERVAL: Final = 4
+DISCO_MIN_INTERVAL: Final = 2
+DISCO_PALETTE: Final = "rainbow"

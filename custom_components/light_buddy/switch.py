@@ -1,4 +1,4 @@
-"""A schedule switch per room."""
+"""A schedule switch and a disco switch per room."""
 
 from typing import Any, override
 
@@ -26,7 +26,11 @@ async def async_setup_entry(
 
 
 class ScheduleSwitch(RoomEntity, SwitchEntity):
-    """Let the room follow its schedule."""
+    """Let the room follow its schedule.
+
+    A color set by hand turns it off until the room is off, the automatic
+    resume, or turning it on again.
+    """
 
     PLATFORM = Platform.SWITCH
     UNIQUE_ID_SUFFIX = "_schedule"
@@ -34,25 +38,48 @@ class ScheduleSwitch(RoomEntity, SwitchEntity):
 
     @property
     @override
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return whether a color set by hand pauses the schedule, since when."""
-        return {
-            "paused": self._automation.paused,
-            "paused_since": self._automation.paused_since,
-        }
-
-    @property
-    @override
     def is_on(self) -> bool:
-        """Return True if the room follows its schedule."""
-        return self._automation.enabled
+        """Return True if the room follows its schedule right now."""
+        return self._automation.enabled and not self._automation.paused
 
     @override
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Follow the schedule, and apply it right away."""
-        await self._automation.async_set_enabled(True)
+        """Follow the schedule again, and apply it right away.
+
+        Already following it, nothing changes.
+        """
+        if not self._automation.enabled:
+            await self._automation.async_set_enabled(True)
+        elif self._automation.paused:
+            await self._automation.async_resume()
 
     @override
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Stop following the schedule. Lights keep what they show."""
         await self._automation.async_set_enabled(False)
+
+
+class DiscoSwitch(RoomEntity, SwitchEntity):
+    """Let the colored lights of the room change colors."""
+
+    PLATFORM = Platform.SWITCH
+    UNIQUE_ID_SUFFIX = "_disco"
+    TRANSLATION_KEY = "disco"
+
+    _attr_icon = "mdi:party-popper"
+
+    @property
+    @override
+    def is_on(self) -> bool:
+        """Return True while disco runs."""
+        return self._automation.disco.running
+
+    @override
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Start changing colors. White lights turn off meanwhile."""
+        await self._automation.disco.async_start()
+
+    @override
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Stop changing colors, and restore what the lights showed before."""
+        await self._automation.disco.async_stop(restore=True)

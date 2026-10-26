@@ -24,7 +24,6 @@ from .conftest import COLOR_LIGHT
 
 ROOM = "light.all_wohnzimmer"
 SCHEDULE = "switch.schedule_wohnzimmer"
-RESUME = "button.resume_schedule_wohnzimmer"
 # Reaches every color temperature of the tests.
 WIDE_LIGHT = {**COLOR_LIGHT, "max_color_temp_kelvin": 6500}
 
@@ -95,9 +94,8 @@ async def test_color_through_room_pauses(
 
     await _room(hass).async_turn_on(**params)
     assert automation.paused
-    attributes = hass.states.get(SCHEDULE).attributes
-    assert attributes["paused"] is True
-    assert attributes["paused_since"] is not None
+    # The schedule switch shows it.
+    assert hass.states.get(SCHEDULE).state == STATE_OFF
 
     hass.states.async_set(lamp, STATE_ON, _on(2700), context=calls[0].context)
     automation.async_set_points(_curve(5000))
@@ -288,7 +286,7 @@ async def test_pause_ends_when_room_is_off(
         hass.states.async_set(lamp, STATE_OFF, WIDE_LIGHT)
     await hass.async_block_till_done()
     assert not automation.paused
-    assert hass.states.get(SCHEDULE).attributes["paused"] is False
+    assert hass.states.get(SCHEDULE).state == STATE_ON
 
     await _room(hass).async_turn_on()
     # Sent once the room's command interval has passed.
@@ -346,22 +344,26 @@ async def test_unavailable_room_keeps_pause(
     assert automation.paused
 
 
-async def test_resume_button(hass: HomeAssistant, add_light, setup_integration) -> None:
-    """The resume button ends the pause and applies the target at once."""
+async def test_switch_resumes(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Turning the schedule switch on ends the pause and applies at once."""
     automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
     hass.states.async_set(lamp, STATE_ON, _on(2700))
     await hass.async_block_till_done()
     automation.async_mark_manual()
     calls = async_mock_service(hass, "light", "turn_on")
 
+    assert hass.states.get(SCHEDULE).state == STATE_OFF
     await hass.services.async_call(
-        "button", "press", {"entity_id": RESUME}, blocking=True
+        "switch", "turn_on", {"entity_id": SCHEDULE}, blocking=True
     )
     assert not automation.paused
+    assert automation.enabled
+    assert hass.states.get(SCHEDULE).state == STATE_ON
     assert [call.data for call in calls] == [
         {"entity_id": [lamp], "color_temp_kelvin": 4000, "transition": 2}
     ]
-    assert hass.states.get(RESUME).name == "Resume schedule Wohnzimmer"
 
 
 async def test_resume_does_not_pause_again(
@@ -599,3 +601,66 @@ async def test_turning_on_ends_fade_out_window(
     hass.states.async_set(lamp, STATE_ON, _on(2700), context=Context())
     await hass.async_block_till_done()
     assert automation.paused
+
+
+async def _schedule(hass: HomeAssistant, service: str) -> None:
+    await hass.services.async_call(
+        "switch", service, {"entity_id": SCHEDULE}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+
+async def test_switch_turned_off_by_hand_stays_off(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Turned off by hand, the room being off does not turn it on again."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    await _schedule(hass, "turn_off")
+    automation.async_mark_manual()
+
+    hass.states.async_set(lamp, STATE_OFF, WIDE_LIGHT)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(SCHEDULE).state == STATE_OFF
+    assert not automation.enabled
+
+
+async def test_switch_off_ends_pause(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Turning off a paused schedule, then on, follows it again."""
+    automation, (lamp,) = await _setup_room(hass, add_light, setup_integration, "lamp")
+    calls = async_mock_service(hass, "light", "turn_on")
+    hass.states.async_set(lamp, STATE_ON, _on(2700))
+    await hass.async_block_till_done()
+    automation.async_mark_manual()
+
+    await _schedule(hass, "turn_off")
+    assert not automation.paused
+    # A change by hand while off does not keep it off later.
+    automation.async_mark_manual()
+    await _schedule(hass, "turn_on")
+
+    assert hass.states.get(SCHEDULE).state == STATE_ON
+    assert not automation.paused
+    assert [call.data for call in calls] == [
+        {"entity_id": [lamp], "color_temp_kelvin": 4000, "transition": 2}
+    ]
+
+
+async def test_auto_resume_turns_switch_on(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """The automatic resume turns the schedule switch on again."""
+    automation, _ = await _setup_room(hass, add_light, setup_integration, "lamp")
+    async_mock_service(hass, "light", "turn_on")
+    automation.async_set_settings(ScheduleSettings(auto_resume_minutes=30))
+    automation.async_mark_manual()
+    await hass.async_block_till_done()
+    assert hass.states.get(SCHEDULE).state == STATE_OFF
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=31))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(SCHEDULE).state == STATE_ON

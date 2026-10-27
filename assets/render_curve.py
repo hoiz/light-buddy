@@ -1,6 +1,6 @@
 """Render the example curve of the README.
 
-    .venv/bin/python assets/render_curve.py
+.venv/bin/python assets/render_curve.py
 """
 
 import datetime as dt
@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from custom_components.light_buddy.chart import render_svg  # noqa: E402
-from custom_components.light_buddy.schedule import DEFAULT_SCHEDULE, Sun  # noqa: E402
+from custom_components.light_buddy.chart import render_svg
+from custom_components.light_buddy.schedule import DEFAULT_SCHEDULE, Sun
 
 # Berlin on an autumn afternoon.
 NOW = dt.datetime(2026, 10, 27, 15, 0, tzinfo=ZoneInfo("Europe/Berlin"))

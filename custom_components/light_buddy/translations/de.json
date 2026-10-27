@@ -77,15 +77,15 @@
       "color_temp_offset_unit": {
         "name": "Einheit Farbtemperatur-Offset",
         "state": {
-          "K": "Kelvin",
-          "mired": "Mired"
+          "mired": "Mired",
+          "kelvin": "Kelvin"
         }
       },
       "color_temp_offset_unit_light": {
         "name": "{light} Einheit Farbtemperatur-Offset",
         "state": {
-          "K": "Kelvin",
-          "mired": "Mired"
+          "mired": "Mired",
+          "kelvin": "Kelvin"
         }
       }
     },

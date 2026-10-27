@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .entity import LightOffsetEntity
 from .manager import LightBuddyConfigEntry
-from .offset import OFFSET_LIMITS, OFFSET_STEPS
+from .offset import OFFSET_LIMITS, OFFSET_STEPS, UNIT_SYMBOLS
 
 PARALLEL_UPDATES = 0
 
@@ -46,7 +46,7 @@ class ColorTempOffsetNumber(LightOffsetEntity, NumberEntity):
     @override
     def native_unit_of_measurement(self) -> str:
         """Return the unit chosen for the offset."""
-        return self.offset.unit
+        return UNIT_SYMBOLS[self.offset.unit]
 
     @property
     @override

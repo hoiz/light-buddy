@@ -75,7 +75,9 @@ async def test_slider_applies_live(
 
     await _set_offset(hass, _slider(hass, lamp), -300)
     registry_id = er.async_get(hass).async_get(lamp).id
-    assert entry.options[CONF_OFFSETS] == {registry_id: {"value": -300, "unit": "K"}}
+    assert entry.options[CONF_OFFSETS] == {
+        registry_id: {"value": -300, "unit": "kelvin"}
+    }
     assert hass.states.get(_slider(hass, lamp)).state == "-300"
     assert [call.data for call in calls] == [
         {"entity_id": [lamp], "color_temp_kelvin": 2700}

@@ -4,7 +4,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Self
 
-from .const import CONF_OFFSET_UNIT, CONF_OFFSET_VALUE, UNIT_KELVIN, UNIT_MIRED
+from .const import (
+    CONF_OFFSET_UNIT,
+    CONF_OFFSET_VALUE,
+    OLD_UNIT_KELVIN,
+    UNIT_KELVIN,
+    UNIT_MIRED,
+)
 
 # Beyond what any light supports. Keeps results away from zero mired.
 MIN_KELVIN = 1000
@@ -20,6 +26,8 @@ REFERENCE_KELVIN = 3000
 # Largest offset and slider step per unit.
 OFFSET_LIMITS = {UNIT_KELVIN: 1500, UNIT_MIRED: 100}
 OFFSET_STEPS = {UNIT_KELVIN: 25, UNIT_MIRED: 1}
+# Shown next to the slider.
+UNIT_SYMBOLS = {UNIT_KELVIN: "K", UNIT_MIRED: "mired"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +45,10 @@ class ColorTempOffset:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> Self:
         """Create an offset from its stored options."""
-        return cls(data[CONF_OFFSET_VALUE], data[CONF_OFFSET_UNIT])
+        unit = data[CONF_OFFSET_UNIT]
+        return cls(
+            data[CONF_OFFSET_VALUE], UNIT_KELVIN if unit == OLD_UNIT_KELVIN else unit
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """Return the offset for storing in the options."""

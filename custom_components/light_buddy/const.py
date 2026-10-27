@@ -31,7 +31,9 @@ SEPARATE_OFF: Final = "off"
 SEPARATE_IKEA: Final = "ikea"
 SEPARATE_ALL: Final = "all"
 
-UNIT_KELVIN: Final = "K"
+UNIT_KELVIN: Final = "kelvin"
+# How Kelvin offsets were stored before.
+OLD_UNIT_KELVIN: Final = "K"
 UNIT_MIRED: Final = "mired"
 
 # Wait for registry changes to settle before recomputing room membership.

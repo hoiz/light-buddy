@@ -82,11 +82,16 @@ Every room follows one color temperature schedule, which follows the sun. The su
 | When | Color temperature |
 |---|---|
 | Sunrise, not before 06:00 and not after 07:30 | Warmest (2700 K) |
+| Sunrise + 2:00, not before 08:00 and not after 09:00 | Coldest (5000 K) |
 | Solar noon | Coldest (5000 K) |
 | Sunset | Two thirds of the way back to the warmest (3200 K) |
 | Sunset + 1:30, at the latest 22:00 | Warmest (2700 K) |
 
-At night it holds the warmest value. Between these points, the color temperature changes the way daylight does: fast after sunrise and before sunset, slowly around noon. The change runs in mired, matching how the eye perceives color temperature.
+The morning gets cold fast, so you are awake: about two hours after sunrise it is already at the coldest value, and it stays there until solar noon. In the afternoon it gets warmer slowly, and at night it holds the warmest value. Between the points, the color temperature changes the way daylight does, in mired, matching how the eye perceives color temperature.
+
+![The curve on an autumn day in Berlin, with the longest and the shortest day as thin lines](assets/curve.svg)
+
+*The curve on an autumn day in Berlin. Thin lines: the longest and the shortest day of the year.*
 
 **Entities:**
 
@@ -115,7 +120,7 @@ The switch turns on again by itself when all lights in the room are off, and opt
 | Setting | Default | Meaning |
 |---|---|---|
 | Warmest color temperature | 2700 K | At night, in the early morning and in the late evening. |
-| Coldest color temperature | 5000 K | At solar noon. At least 500 K above the warmest. |
+| Coldest color temperature | 5000 K | From about two hours after sunrise until solar noon. At least 500 K above the warmest. |
 | Smallest change | 50 K | Lights that are on only get a new color temperature once the target differs at least this much. |
 | Transition | 2 s | For the updates every minute. IKEA lights ignore other commands during a transition, so keep it short. |
 | Resume after | 0 (never) | After a manual change, the Schedule switch turns on again by itself after this time. |

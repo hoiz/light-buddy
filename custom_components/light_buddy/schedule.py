@@ -96,14 +96,23 @@ SUNSET_SHARE = 0.66
 def sun_schedule(warmest: int, coldest: int) -> tuple[SchedulePoint, ...]:
     """Return the schedule between a warmest and a coldest color temperature.
 
-    Coldest at solar noon, on the way back at sunset, and warmest soon after.
-    The morning starts with sunrise, within limits.
+    The morning starts with sunrise and is coldest two hours later, both
+    within limits. It stays coldest until solar noon, is on the way back at
+    sunset, and warmest soon after.
     """
     sunset_mired = MIRED / coldest + SUNSET_SHARE * (MIRED / warmest - MIRED / coldest)
     sunset = round(MIRED / sunset_mired / 10) * 10
     return (
         SchedulePoint(
             warmest, sun_event=SUNRISE, earliest=dt.time(6, 0), latest=dt.time(7, 30)
+        ),
+        # Awake fast: coldest long before noon.
+        SchedulePoint(
+            coldest,
+            sun_event=SUNRISE,
+            offset_minutes=120,
+            earliest=dt.time(8, 0),
+            latest=dt.time(9, 0),
         ),
         SchedulePoint(coldest, sun_event=NOON),
         SchedulePoint(sunset, sun_event=SUNSET),

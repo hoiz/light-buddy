@@ -48,7 +48,10 @@ def test_encode_round_trip() -> None:
     assert text == "0000_k2200,1200_k5000_d01234,1200_k4000_d56"
     assert decode_points(text) == WEEKEND
     text = encode_points(DEFAULT_SCHEDULE)
-    assert text == "r+0_w0600-0730_k2700,n+0_k5000,s+0_k3200,s+90_w-2200_k2700"
+    assert (
+        text
+        == "r+0_w0600-0730_k2700,r+120_w0800-0900_k5000,n+0_k5000,s+0_k3200,s+90_w-2200_k2700"
+    )
     assert decode_points(text) == DEFAULT_SCHEDULE
 
 

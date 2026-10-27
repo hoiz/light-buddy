@@ -44,7 +44,7 @@
         },
         "data_description": {
           "warmest": "At night, in the early morning, and from 1:30 after sunset (at the latest 22:00).",
-          "coldest": "At solar noon.",
+          "coldest": "From about two hours after sunrise (not before 08:00, not after 09:00) until solar noon.",
           "threshold": "Lights that are on only get a new color temperature once the target differs at least this much.",
           "transition": "For the schedule's updates every minute. Keep it short: IKEA lights ignore other commands, even turning off, during a transition.",
           "auto_resume_minutes": "After a manual change, the room's Schedule switch turns on again by itself after this time. 0 waits until the room is off.",
@@ -52,7 +52,7 @@
           "disco_interval": "Seconds until the next color. Each color change sends one command per color, so very short times load the Zigbee network.",
           "disco_palette": "The colors the disco mode cycles through. Each light shows a different one."
         },
-        "description": "![Curve]({chart})\n\nThe schedule follows the sun: warmest from late evening until sunrise (not before 06:00, not after 07:30), coldest at solar noon. The chart shows the saved values for today, and thin lines for the longest and shortest day."
+        "description": "![Curve]({chart})\n\nThe schedule follows the sun: warmest from late evening until sunrise (not before 06:00, not after 07:30), coldest from about two hours after sunrise until solar noon. The chart shows the saved values for today, and thin lines for the longest and shortest day."
       }
     },
     "error": {

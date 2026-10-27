@@ -238,7 +238,7 @@ def test_window_keeps_points_apart() -> None:
             DEFAULT_SCHEDULE, dt.date(2026, 5, 20), oslo, Sun(59.91, 10.75)
         )
     }
-    sunset, later = times[DEFAULT_SCHEDULE[2]], times[DEFAULT_SCHEDULE[3]]
+    sunset, later = times[DEFAULT_SCHEDULE[3]], times[DEFAULT_SCHEDULE[4]]
     assert later.strftime("%H:%M") == "22:00"
     assert later - sunset >= dt.timedelta(minutes=30)
 
@@ -246,10 +246,38 @@ def test_window_keeps_points_apart() -> None:
 def test_sun_schedule() -> None:
     """The schedule spans the warmest and coldest value, sunset in between."""
     assert sun_schedule(2700, 5000) == DEFAULT_SCHEDULE
-    assert [point.kelvin for point in DEFAULT_SCHEDULE] == [2700, 5000, 3200, 2700]
+    assert [point.kelvin for point in DEFAULT_SCHEDULE] == [
+        2700,
+        5000,
+        5000,
+        3200,
+        2700,
+    ]
     assert [point.kelvin for point in sun_schedule(3000, 6000)] == [
         3000,
+        6000,
         6000,
         3610,
         3000,
     ]
+
+
+@pytest.mark.parametrize(
+    ("day", "coldest_from"),
+    [
+        # Sunrise at 06:53: two hours later.
+        (dt.date(2026, 10, 27), dt.time(8, 54)),
+        # Sunrise before 06:00: not before 08:00.
+        (SUMMER, dt.time(8, 0)),
+        # Sunrise after 07:30: by 09:00 at the latest.
+        (dt.date(2026, 12, 21), dt.time(9, 0)),
+    ],
+)
+def test_coldest_soon_after_sunrise(day: dt.date, coldest_from: dt.time) -> None:
+    """The morning gets cold fast and stays so until noon."""
+    start = dt.datetime.combine(day, coldest_from, tzinfo=TZ)
+    before = start - dt.timedelta(minutes=30)
+    assert 2700 < target_at(DEFAULT_SCHEDULE, before, BERLIN).kelvin < 5000
+    for minutes in (0, 30, 60):
+        moment = start + dt.timedelta(minutes=minutes)
+        assert target_at(DEFAULT_SCHEDULE, moment, BERLIN) == Target(5000)

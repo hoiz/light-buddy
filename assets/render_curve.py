@@ -13,10 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from custom_components.light_buddy.chart import render_svg
 from custom_components.light_buddy.schedule import DEFAULT_SCHEDULE, Sun
 
-# Berlin on an autumn afternoon.
+# Berlin on an autumn day.
 NOW = dt.datetime(2026, 10, 27, 15, 0, tzinfo=ZoneInfo("Europe/Berlin"))
 SUN = Sun(52.52, 13.40)
 
 Path(__file__).with_name("curve.svg").write_text(
-    render_svg(DEFAULT_SCHEDULE, NOW, "en", SUN)
+    # A picture of no particular moment.
+    render_svg(DEFAULT_SCHEDULE, NOW, "en", SUN, show_now=False)
 )

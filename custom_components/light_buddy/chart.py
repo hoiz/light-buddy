@@ -265,8 +265,10 @@ def render_svg(
     now: dt.datetime,
     language: str,
     sun: Sun | None = None,
+    *,
+    show_now: bool = True,
 ) -> str:
-    """Return the schedule as an SVG chart of a day."""
+    """Return the schedule as an SVG chart of a day, marking now if asked."""
     assert now.tzinfo is not None
     day_curves, season_curves = curves(tuple(points), now.date(), now.tzinfo, sun)
     all_kelvin = [
@@ -339,11 +341,12 @@ def render_svg(
             f'text-anchor="end">{kelvin} K</text>'
         )
     # Now, in the time zone of Home Assistant.
-    minute_now = now.hour * 60 + now.minute
-    parts.append(
-        f'<line x1="{x(minute_now):.1f}" y1="{TOP}" x2="{x(minute_now):.1f}" '
-        f'y2="{TOP + plot_height}" stroke="{GREY}" stroke-dasharray="3 3"/>'
-    )
+    if show_now:
+        minute_now = now.hour * 60 + now.minute
+        parts.append(
+            f'<line x1="{x(minute_now):.1f}" y1="{TOP}" x2="{x(minute_now):.1f}" '
+            f'y2="{TOP + plot_height}" stroke="{GREY}" stroke-dasharray="3 3"/>'
+        )
     # The color depends on the color temperature only, so one gradient from
     # top to bottom colors all curves.
     parts.append(

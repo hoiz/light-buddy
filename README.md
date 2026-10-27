@@ -180,3 +180,7 @@ cp assets/icon.512.png custom_components/light_buddy/brand/icon@2x.png
 ```
 
 Home Assistant shows the images from `custom_components/light_buddy/brand/` directly.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

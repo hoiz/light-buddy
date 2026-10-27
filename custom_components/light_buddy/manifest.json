@@ -1,7 +1,7 @@
 {
   "domain": "light_buddy",
   "name": "Light Buddy",
-  "codeowners": [],
+  "codeowners": ["@hoiz"],
   "config_flow": true,
   "dependencies": ["http"],
   "documentation": "https://github.com/hoiz/light-buddy",
@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/hoiz/light-buddy/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.1.0"
+  "version": "1.0.0"
 }

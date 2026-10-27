@@ -4,6 +4,9 @@
 
 # Light Buddy
 
+[![Validate](https://github.com/hoiz/light-buddy/actions/workflows/validate.yml/badge.svg)](https://github.com/hoiz/light-buddy/actions/workflows/validate.yml)
+[![Tests](https://github.com/hoiz/light-buddy/actions/workflows/tests.yml/badge.svg)](https://github.com/hoiz/light-buddy/actions/workflows/tests.yml)
+
 A custom integration for Home Assistant: **one light per room**, without maintaining light groups.
 
 For every area with at least one light, Light Buddy creates a light entity, e.g. `light.all_living` named "All lights in Living". It switches and dims all lights of the area together and works in a regular dashboard tile with a brightness slider.

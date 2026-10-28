@@ -5,6 +5,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.light_buddy.const import DOMAIN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 
 
 async def test_offset_entity_ids_are_english(
@@ -114,3 +115,54 @@ async def test_one_target_sensor(
     state = hass.states.get("sensor.target_color_temperature")
     assert state.name == "Target color temperature"
     assert state.attributes["unit_of_measurement"] == "K"
+
+
+async def test_room_switches_join_their_area(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Schedule and disco switches are configuration entities in their area."""
+    add_light("lamp", area="Wohnzimmer")
+    await setup_integration()
+    registry = er.async_get(hass)
+
+    for entity_id in ("switch.schedule_wohnzimmer", "switch.disco_wohnzimmer"):
+        entry = registry.async_get(entity_id)
+        assert entry.area_id == "wohnzimmer"
+        assert entry.entity_category is er.EntityCategory.CONFIG
+    # The room light stays outside, so area actions do not reach lamps twice.
+    assert registry.async_get("light.all_wohnzimmer").area_id is None
+
+
+async def test_area_changed_by_hand_is_kept(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """An area removed by hand is not set again after a reload."""
+    add_light("lamp", area="Wohnzimmer")
+    entry = await setup_integration()
+    registry = er.async_get(hass)
+    registry.async_update_entity("switch.schedule_wohnzimmer", area_id=None)
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get("switch.schedule_wohnzimmer").area_id is None
+    assert registry.async_get("switch.disco_wohnzimmer").area_id == "wohnzimmer"
+
+
+async def test_area_actions_skip_room_switches(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Turning off everything in an area leaves the schedule on."""
+    add_light("lamp", area="Wohnzimmer")
+    await setup_integration()
+    assert await async_setup_component(hass, "homeassistant", {})
+
+    await hass.services.async_call(
+        "homeassistant", "turn_off", {"area_id": "wohnzimmer"}, blocking=True
+    )
+    await hass.services.async_call(
+        "switch", "turn_off", {"area_id": "wohnzimmer"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get("switch.schedule_wohnzimmer").state == "on"

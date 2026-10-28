@@ -52,7 +52,7 @@ When you move a light, or add or rename an area, Light Buddy follows without a r
   - Each room sends at most one command every 0.3 s; while dragging a slider, only the latest value is sent.
   - Turning off only goes to lights that are not off already.
   - For lights that don't change brightness and color temperature together cleanly, IKEA ones in particular, **Separate brightness for IKEA lights** (under Settings) sends the color temperature first and the brightness half a second after the transition.
-- **No area:** Light Buddy's entities are deliberately not assigned to an area. Otherwise area actions like "turn off all lights in the living room" would control every light twice.
+- **Areas:** the room light is deliberately not assigned to its area. Otherwise area actions like "turn off all lights in the living room" would control every light twice. The room's Schedule and Disco switches are assigned to it, as configuration entities: they show under "Configuration" on the area's page, and area actions like "turn off everything in the living room" leave them alone. Auto-generated dashboards leave configuration entities out; add them to your own dashboards. If you move a switch to another area or remove its area, Light Buddy keeps that.
 
 ## 2. Color temperature offset
 

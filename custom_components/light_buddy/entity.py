@@ -9,7 +9,11 @@ from homeassistant.core import split_entity_id
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity import Entity
 
+from .const import DOMAIN
 from .offset import ColorTempOffset
+
+# Set in a room entity's registry options once it joined its area.
+OPTION_AREA_ASSIGNED = "area_assigned"
 
 if TYPE_CHECKING:
     from .automation import RoomAutomation
@@ -78,14 +82,16 @@ class LightOffsetEntity(Entity):
 class RoomEntity(Entity):
     """An entity of a room, named after its area, without a device.
 
-    Like the room light, it is not assigned to the area, so area actions do
-    not reach it.
+    Assigned to the area once, so it shows on the area's page; a change by
+    hand is kept. A configuration entity, so area actions, e.g. "turn off
+    everything in the living room", do not reach it.
     """
 
     PLATFORM: ClassVar[Platform]
     UNIQUE_ID_SUFFIX: ClassVar[str]
     TRANSLATION_KEY: ClassVar[str]
 
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_has_entity_name = True
     _attr_should_poll = False
 
@@ -100,8 +106,19 @@ class RoomEntity(Entity):
         self._attr_translation_placeholders = {"area": area_name}
 
     async def async_added_to_hass(self) -> None:
-        """Follow changes of the room's automation."""
+        """Follow changes of the room's automation, and join its area once."""
         await super().async_added_to_hass()
         self.async_on_remove(
             self._automation.async_add_listener(self.async_write_ha_state)
         )
+        if (entry := self.registry_entry) is not None and not entry.options.get(
+            DOMAIN, {}
+        ).get(OPTION_AREA_ASSIGNED):
+            registry = er.async_get(self.hass)
+            if entry.area_id is None:
+                registry.async_update_entity(
+                    entry.entity_id, area_id=self._automation.area_id
+                )
+            registry.async_update_entity_options(
+                entry.entity_id, DOMAIN, {OPTION_AREA_ASSIGNED: True}
+            )

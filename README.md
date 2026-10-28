@@ -103,7 +103,7 @@ The morning gets cold fast, so you are awake: about two hours after sunrise it i
 - **Turning on through the room light:** lights that are off turn on with the target right away, without showing their old color first. A color or color temperature of its own (e.g. from a scene) is kept, see "Manual changes".
 - **Turning on at the light itself or with a wall switch:** the light gets the target within about a second.
 - **Ongoing updates:** every minute, lights that are on get the target with a short transition, if they are at least the smallest change away from it. The rooms are spread across the minute.
-- **Colored lights** are left alone.
+- **Colored lights** get the target, too, if they support color temperature: while the Schedule switch is on, the schedule sets the color. A color you set by hand turns the switch off, see "Manual changes". Lights with colors only are left alone.
 - **Brightness** is up to you; the schedule only changes the color temperature.
 - **Range:** a light that cannot reach the target gets the closest value it supports, e.g. 2900 K for an Elgato Key Light when the warmest value is set to 2700 K.
 

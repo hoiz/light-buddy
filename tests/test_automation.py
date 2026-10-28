@@ -77,8 +77,8 @@ async def test_tick_updates_lights_that_are_on(
     add_light(
         "near", area="Wohnzimmer", state=STATE_ON, attributes=_on(WHITE_LIGHT, 4980)
     )
-    # Someone chose a color, which the schedule leaves alone.
-    add_light(
+    # Showing a color, it gets the target, too, limited to its range.
+    color = add_light(
         "color",
         area="Wohnzimmer",
         state=STATE_ON,
@@ -105,8 +105,11 @@ async def test_tick_updates_lights_that_are_on(
 
     await _tick(hass)
 
-    assert sorted((call.data for call in calls), key=str) == [
+    assert sorted(
+        (call.data for call in calls), key=lambda data: data["entity_id"]
+    ) == [
         {"entity_id": [cold], "color_temp_kelvin": 4700, "transition": 2},
+        {"entity_id": [color], "color_temp_kelvin": 4000, "transition": 2},
         {"entity_id": [plain], "color_temp_kelvin": 5000, "transition": 2},
     ]
 
@@ -287,7 +290,7 @@ async def test_lights_turned_on_together_get_one_command(
 async def test_light_with_color_turned_on_elsewhere(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
-    """A light turned on with a color, e.g. by a scene, keeps it."""
+    """A light turning on in a color, e.g. its last one, gets the target."""
     lamp = add_light("lamp", area="Wohnzimmer")
     await setup_integration(schedule=True)
     calls = async_mock_service(hass, "light", "turn_on")
@@ -297,7 +300,10 @@ async def test_light_with_color_turned_on_elsewhere(
     )
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=1))
     await hass.async_block_till_done()
-    assert calls == []
+    # 5000 K is beyond the light's maximum.
+    assert [call.data for call in calls] == [
+        {"entity_id": [lamp], "color_temp_kelvin": 4000, "transition": 1}
+    ]
 
 
 async def test_no_target_while_turning_off(

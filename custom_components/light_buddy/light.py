@@ -401,12 +401,13 @@ class RoomLight(LightEntity):
         members: list[str] | None = None,
         threshold: float = 0,
     ) -> None:
-        """Bring lights that are on and show a color temperature to the target.
+        """Bring lights that are on and can show a color temperature to the target.
 
-        Lights showing a color were set by someone and are left alone. A light
-        is compared to what it can show, with its offset and limited to its
-        range, so lights that cannot reach the target are not sent it again
-        and again. Nothing is sent while the room is turning off.
+        Lights showing a color get it, too: while the schedule is on, it sets
+        the color. A light showing a color temperature is compared to what it
+        can show, with its offset and limited to its range, so lights that
+        cannot reach the target are not sent it again and again. Nothing is
+        sent while the room is turning off.
         """
         assert self._commander is not None
         if self._turning_off(self.hass.loop.time()):
@@ -417,18 +418,20 @@ class RoomLight(LightEntity):
             if state is None or state.state != STATE_ON:
                 continue
             attributes = state.attributes
-            # Lights showing a color, or only brightness, are left alone.
+            # Lights with colors or brightness only are left alone.
+            if not color_temp_supported(attributes.get(ATTR_SUPPORTED_COLOR_MODES)):
+                continue
             if (
-                attributes.get(ATTR_COLOR_MODE) != ColorMode.COLOR_TEMP
-                or (current := attributes.get(ATTR_COLOR_TEMP_KELVIN)) is None
+                attributes.get(ATTR_COLOR_MODE) == ColorMode.COLOR_TEMP
+                and (current := attributes.get(ATTR_COLOR_TEMP_KELVIN)) is not None
             ):
-                continue
-            offset = self._offsets.get(entity_id)
-            reachable = reachable_kelvin(
-                offset.apply(target.kelvin) if offset else target.kelvin, attributes
-            )
-            if abs(current - reachable) < threshold:
-                continue
+                offset = self._offsets.get(entity_id)
+                reachable = reachable_kelvin(
+                    offset.apply(target.kelvin) if offset else target.kelvin,
+                    attributes,
+                )
+                if abs(current - reachable) < threshold:
+                    continue
             params: dict[str, Any] = {ATTR_COLOR_TEMP_KELVIN: target.kelvin}
             if transition and attributes.get(ATTR_SUPPORTED_FEATURES, 0) & (
                 LightEntityFeature.TRANSITION

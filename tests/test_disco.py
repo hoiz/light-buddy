@@ -381,14 +381,12 @@ async def test_settings_apply_live(
 async def test_no_color_lights(
     hass: HomeAssistant, add_light, setup_integration
 ) -> None:
-    """Disco needs at least one light with colors."""
+    """A room without lights with colors has no disco switch."""
     add_light("white", area="Wohnzimmer", state=STATE_ON, attributes=WHITE_LIGHT)
     await setup_integration()
 
-    with pytest.raises(HomeAssistantError) as err:
-        await _switch(hass, "turn_on")
-    assert err.value.translation_key == "no_color_lights"
-    assert hass.states.get(DISCO).state == STATE_OFF
+    assert hass.states.get(DISCO) is None
+    assert hass.states.get(SCHEDULE) is not None
 
 
 async def test_stop_cancels_commands_being_sent(
@@ -727,3 +725,17 @@ async def test_lights_in_unknown_state(
     await _switch(hass, "turn_off")
 
     assert [call.data for call in off_calls] == [{"entity_id": [unknown]}]
+
+
+async def test_no_color_lights_right_now(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """With its light with colors unavailable, disco cannot start."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON)
+    await setup_integration()
+    hass.states.async_set(lamp, "unavailable")
+
+    with pytest.raises(HomeAssistantError) as err:
+        await _switch(hass, "turn_on")
+    assert err.value.translation_key == "no_color_lights"
+    assert hass.states.get(DISCO).state == STATE_OFF

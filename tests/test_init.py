@@ -1,11 +1,23 @@
 """Tests for setting up and migrating Light Buddy."""
 
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from datetime import timedelta
+
+import pytest
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+    async_mock_service,
+)
 
 from custom_components.light_buddy.const import DOMAIN
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import area_registry as ar, entity_registry as er
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
+
+from .conftest import COLOR_LIGHT, PLUG, WHITE_LIGHT
 
 
 async def test_offset_entity_ids_are_english(
@@ -166,3 +178,122 @@ async def test_area_actions_skip_room_switches(
     await hass.async_block_till_done()
 
     assert hass.states.get("switch.schedule_wohnzimmer").state == "on"
+
+
+@pytest.mark.parametrize(
+    ("attributes", "switches"),
+    [
+        (COLOR_LIGHT, {"schedule", "disco"}),
+        (WHITE_LIGHT, {"schedule"}),
+        ({"supported_color_modes": ["hs"], "supported_features": 0}, {"disco"}),
+        ({"supported_color_modes": ["brightness"], "supported_features": 0}, set()),
+        (PLUG, set()),
+    ],
+)
+async def test_switches_fit_the_lights(
+    hass: HomeAssistant,
+    add_light,
+    setup_integration,
+    attributes: dict,
+    switches: set[str],
+) -> None:
+    """A room gets the switches its lights can use, and always its light."""
+    add_light("lamp", area="Wohnzimmer", attributes=attributes)
+    await setup_integration()
+
+    assert hass.states.get("light.all_wohnzimmer") is not None
+    present = {
+        name
+        for name in ("schedule", "disco")
+        if hass.states.get(f"switch.{name}_wohnzimmer") is not None
+    }
+    assert present == switches
+
+
+async def test_switches_follow_the_lights(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light with colors added later brings the disco switch, and takes it."""
+    add_light("white", area="Wohnzimmer", attributes=WHITE_LIGHT)
+    await setup_integration()
+    assert hass.states.get("switch.disco_wohnzimmer") is None
+
+    color = add_light("color", area="Wohnzimmer", attributes=COLOR_LIGHT)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.disco_wohnzimmer") is not None
+
+    er.async_get(hass).async_remove(color)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=4))
+    await hass.async_block_till_done()
+    assert hass.states.get("switch.disco_wohnzimmer") is None
+    assert hass.states.get("switch.schedule_wohnzimmer") is not None
+
+
+async def _refresh(hass: HomeAssistant) -> None:
+    """Let the debounced refresh after registry changes run."""
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+    await hass.async_block_till_done()
+
+
+async def test_disco_ends_with_its_switch(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """When the last light with colors leaves, a running disco ends."""
+    color = add_light("color", area="Wohnzimmer", state=STATE_ON)
+    white = add_light("white", area="Wohnzimmer", attributes=WHITE_LIGHT)
+    entry = await setup_integration()
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": "switch.disco_wohnzimmer"}, blocking=True
+    )
+    automation = entry.runtime_data._automations["wohnzimmer"]
+    assert automation.disco.running
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    er.async_get(hass).async_update_entity(color, area_id=None)
+    ar.async_get(hass).async_get_or_create("Küche")
+    er.async_get(hass).async_update_entity(color, area_id="kuche")
+    await _refresh(hass)
+
+    assert hass.states.get("switch.disco_wohnzimmer") is None
+    assert not automation.disco.running
+    # The color light belongs to the Küche now, whose schedule takes it
+    # over; the white light was off before disco and stays off.
+    assert calls == []
+    assert hass.states.get(white).state == STATE_OFF
+
+
+async def test_other_switch_stays_while_one_comes(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """Adding the disco switch leaves the schedule switch as it is."""
+    add_light("white", area="Wohnzimmer", attributes=WHITE_LIGHT)
+    await setup_integration()
+    seen: list[str] = []
+    async_track_state_change_event(
+        hass,
+        "switch.schedule_wohnzimmer",
+        lambda event: seen.append(event.data["new_state"].state),
+    )
+
+    add_light("color", area="Wohnzimmer")
+    await _refresh(hass)
+
+    assert hass.states.get("switch.disco_wohnzimmer") is not None
+    assert seen == []
+
+
+async def test_unknown_light_keeps_switches(
+    hass: HomeAssistant, add_light, setup_integration
+) -> None:
+    """A light whose color modes are not known takes no switch away."""
+    color = add_light("color", area="Wohnzimmer")
+    await setup_integration()
+    hass.states.async_remove(color)
+
+    # Any registry change of the light refreshes the rooms.
+    er.async_get(hass).async_update_entity(color, name="Lamp")
+    await _refresh(hass)
+
+    assert hass.states.get("switch.disco_wohnzimmer") is not None
+    assert hass.states.get("switch.schedule_wohnzimmer") is not None

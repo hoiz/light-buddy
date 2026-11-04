@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, ClassVar
 
 from homeassistant.const import EntityCategory, Platform
-from homeassistant.core import split_entity_id
+from homeassistant.core import callback, split_entity_id
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity import Entity
 
@@ -90,6 +91,8 @@ class RoomEntity(Entity):
     PLATFORM: ClassVar[Platform]
     UNIQUE_ID_SUFFIX: ClassVar[str]
     TRANSLATION_KEY: ClassVar[str]
+    # Whether a room whose lights have these color modes gets the entity.
+    NEEDS: ClassVar[Callable[[Iterable[str]], bool]]
 
     _attr_entity_category = EntityCategory.CONFIG
     _attr_has_entity_name = True
@@ -104,6 +107,10 @@ class RoomEntity(Entity):
         self._attr_unique_id = f"{area_id}{self.UNIQUE_ID_SUFFIX}"
         self._attr_translation_key = self.TRANSLATION_KEY
         self._attr_translation_placeholders = {"area": area_name}
+
+    @callback
+    def async_dropped(self) -> None:
+        """Let go of what the entity does, as the room no longer gets it."""
 
     async def async_added_to_hass(self) -> None:
         """Follow changes of the room's automation, and join its area once."""

@@ -2,9 +2,10 @@
 
 from typing import Any, override
 
+from homeassistant.components.light import color_supported, color_temp_supported
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .entity import RoomEntity
@@ -35,6 +36,7 @@ class ScheduleSwitch(RoomEntity, SwitchEntity):
     PLATFORM = Platform.SWITCH
     UNIQUE_ID_SUFFIX = "_schedule"
     TRANSLATION_KEY = "schedule"
+    NEEDS = staticmethod(color_temp_supported)
 
     @property
     @override
@@ -65,6 +67,15 @@ class DiscoSwitch(RoomEntity, SwitchEntity):
     PLATFORM = Platform.SWITCH
     UNIQUE_ID_SUFFIX = "_disco"
     TRANSLATION_KEY = "disco"
+    NEEDS = staticmethod(color_supported)
+
+    @callback
+    @override
+    def async_dropped(self) -> None:
+        """End a running disco, as nothing could turn it off any more."""
+        disco = self._automation.disco
+        if disco.running:
+            self._automation.async_track(disco.async_stop(restore=True))
 
     _attr_icon = "mdi:party-popper"
 

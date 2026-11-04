@@ -201,29 +201,59 @@ class RoomManager:
         )
         self._offset_light_ids = {entry.entity_id for entry in offset_lights.values()}
         self._async_update_separate_lights()
+        # Each room gets the switches its lights can use.
+        room_classes = {
+            area_id: self._room_classes(area_id, members, entity_registry)
+            for area_id, members in rooms.items()
+        }
 
-        self._async_remove_stale(entity_registry, rooms.keys(), offset_lights.keys())
+        self._async_remove_stale(entity_registry, room_classes, offset_lights.keys())
         self._async_refresh_automations(rooms.keys())
         self._async_refresh_lights(rooms, area_registry)
-        self._async_refresh_room_entities(rooms.keys(), area_registry)
+        self._async_refresh_room_entities(room_classes, area_registry)
         self._async_refresh_offset_entities(offset_lights)
+
+    def _room_classes(
+        self, area_id: str, members: Collection[str], entity_registry: er.EntityRegistry
+    ) -> tuple[type[RoomEntity], ...]:
+        """Return the room entities a room's lights can use.
+
+        Lights whose color modes are not known, e.g. right after a restart,
+        take no switch away.
+        """
+        modes: set[str] = set()
+        unknown = False
+        for entity_id in members:
+            entry = entity_registry.async_get(entity_id)
+            light_modes = _color_modes(self.hass, entry) if entry else None
+            if light_modes is None:
+                unknown = True
+            else:
+                modes |= light_modes
+        keep = (
+            {type(entity) for entity in self._room_entities.get(area_id, ())}
+            if unknown
+            else set()
+        )
+        return _room_entity_classes(modes, keep)
 
     @callback
     def _async_remove_stale(
         self,
         entity_registry: er.EntityRegistry,
-        area_ids: Collection[str],
+        room_classes: Mapping[str, tuple[type[RoomEntity], ...]],
         registry_ids: Collection[str],
     ) -> None:
-        """Remove the entities of areas and lights that are gone."""
+        """Remove the entities of areas and lights that are gone.
+
+        Also switches a room's lights can no longer use.
+        """
+        area_ids = room_classes.keys()
         wanted = (
             {
                 f"{area_id}{suffix}"
-                for area_id in area_ids
-                for suffix in (
-                    "",
-                    *(cls.UNIQUE_ID_SUFFIX for cls in _room_entity_classes()),
-                )
+                for area_id, classes in room_classes.items()
+                for suffix in ("", *(cls.UNIQUE_ID_SUFFIX for cls in classes))
             }
             | {
                 f"{registry_id}{cls.UNIQUE_ID_SUFFIX}"
@@ -393,20 +423,36 @@ class RoomManager:
 
     @callback
     def _async_refresh_room_entities(
-        self, area_ids: Collection[str], area_registry: ar.AreaRegistry
+        self,
+        room_classes: Mapping[str, tuple[type[RoomEntity], ...]],
+        area_registry: ar.AreaRegistry,
     ) -> None:
         new_entities: list[ManagedEntity] = []
-        for area_id in area_ids:
+        for area_id, classes in room_classes.items():
             name = area_registry.async_get_area(area_id).name  # type: ignore[union-attr]
             entities = self._room_entities.get(area_id)
+            automation = self._automations[area_id]
+            for entity in entities or ():
+                if type(entity) not in classes:
+                    # E.g. a running disco ends with its switch.
+                    entity.async_dropped()
             if entities is not None and all(
                 entity.area_name == name for entity in entities
             ):
+                # Same name: only the entities that come or go change, so
+                # the others stay as they are.
+                kept = {type(entity): entity for entity in entities}
+                if set(kept) == set(classes):
+                    continue
+                gone = [entity for entity in entities if type(entity) not in classes]
+                added = [cls(automation, name) for cls in classes if cls not in kept]
+                by_class = {**kept, **{type(entity): entity for entity in added}}
+                self._room_entities[area_id] = [by_class[cls] for cls in classes]
+                if gone:
+                    self._async_replace(gone, [], lambda: False)
+                new_entities.extend(added)
                 continue
-            automation = self._automations[area_id]
-            new: list[RoomEntity] = [
-                cls(automation, name) for cls in _room_entity_classes()
-            ]
+            new: list[RoomEntity] = [cls(automation, name) for cls in classes]
             self._room_entities[area_id] = new
             if entities is None:
                 new_entities.extend(new)
@@ -529,12 +575,22 @@ class RoomManager:
             await room.async_set_member_color_temp(entity_id, requested)
 
 
-def _room_entity_classes() -> tuple[type[RoomEntity], ...]:
-    """Return the entities each room gets next to its room light."""
+def _room_entity_classes(
+    color_modes: Collection[str], keep: Collection[type[RoomEntity]] = ()
+) -> tuple[type[RoomEntity], ...]:
+    """Return the entities a room gets next to its room light.
+
+    Only those its lights can use, by their combined color modes, and those
+    to keep.
+    """
     # Imported here, as the platforms import this module.
     from .switch import DiscoSwitch, ScheduleSwitch
 
-    return (ScheduleSwitch, DiscoSwitch)
+    return tuple(
+        cls
+        for cls in (ScheduleSwitch, DiscoSwitch)
+        if cls.NEEDS(color_modes) or cls in keep
+    )
 
 
 def offset_entity_classes() -> tuple[type[LightOffsetEntity], ...]:
@@ -545,16 +601,24 @@ def offset_entity_classes() -> tuple[type[LightOffsetEntity], ...]:
     return (ColorTempOffsetNumber, ColorTempOffsetUnitSelect)
 
 
+def _color_modes(hass: HomeAssistant, entry: er.RegistryEntry) -> set[str] | None:
+    """Return the color modes a light supports, from the registry or state.
+
+    None if not known.
+    """
+    modes = (entry.capabilities or {}).get(ATTR_SUPPORTED_COLOR_MODES)
+    if modes is None and (state := hass.states.get(entry.entity_id)) is not None:
+        modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
+    return None if modes is None else set(modes)
+
+
 def _supports_color_temp(hass: HomeAssistant, entry: er.RegistryEntry) -> bool:
     """Return True if a light can show a color temperature.
 
     Lights with only colors are left out: they show a color temperature as a
     color, which an offset cannot be previewed on.
     """
-    modes = (entry.capabilities or {}).get(ATTR_SUPPORTED_COLOR_MODES)
-    if modes is None and (state := hass.states.get(entry.entity_id)) is not None:
-        modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
-    return color_temp_supported(modes)
+    return color_temp_supported(_color_modes(hass, entry) or ())
 
 
 @callback

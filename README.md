@@ -95,7 +95,7 @@ The morning gets cold fast, so you are awake: about two hours after sunrise it i
 
 **Entities:**
 
-- **Schedule** (`switch.schedule_<area>`), one per room: on while the room follows the schedule. Turn it off to stop the schedule in that room; it stays off, also across restarts, until you turn it on again.
+- **Schedule** (`switch.schedule_<area>`), one per room with lights that support color temperature: on while the room follows the schedule. Turn it off to stop the schedule in that room; it stays off, also across restarts, until you turn it on again.
 - **Target color temperature** (`sensor.target_color_temperature`): the schedule's current value, the same for all rooms, e.g. for your own automations.
 
 **How it behaves:**
@@ -127,7 +127,7 @@ The switch turns on again by itself when all lights in the room are off, and opt
 
 ## 4. Disco mode
 
-Every room has a **Disco** switch (`switch.disco_<area>`). While it is on:
+Every room with lights that support colors has a **Disco** switch (`switch.disco_<area>`). While it is on:
 
 - **Colored lights** cycle through a palette, each light showing a different color. Lights that were off turn on with the room's brightness, or at full brightness if the room was off.
 - **White lights** (and other lights without color) turn off.

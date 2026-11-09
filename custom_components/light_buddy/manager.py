@@ -45,7 +45,6 @@ from .const import (
     CONF_EXCLUDED_LIGHTS,
     CONF_OFFSETS,
     CONF_SCHEDULES_OFF,
-    COZY_BLEND,
     COZY_MIN_DURATION,
     COZY_OFF_TIME,
     MEMBERSHIP_DEBOUNCE_SECONDS,
@@ -55,7 +54,7 @@ from .const import (
 from .disco import DiscoSettings
 from .membership import async_resolve_rooms
 from .offset import ColorTempOffset
-from .schedule import Target, blend, target_at
+from .schedule import Target, target_at
 
 if TYPE_CHECKING:
     from .entity import LightOffsetEntity, RoomEntity
@@ -115,9 +114,6 @@ class RoomManager:
         ):
             self.cozy_since = None
             self._async_store_cozy()
-        # Moving between the curves: when it started, and the share of cozy
-        # mode then.
-        self._cozy_blend: tuple[dt.datetime, float] | None = None
         self.disco_settings = DiscoSettings.from_options(entry.options)
         self._exclusions = _exclusions(entry.options)
         self._lights: dict[str, RoomLight] = {}
@@ -352,7 +348,7 @@ class RoomManager:
             return
         separate_changed = settings.separate_commands != self.settings.separate_commands
         # The cozy points only matter while they are in use.
-        cozy_in_use = self._cozy_share(dt_util.now()) > 0
+        cozy_in_use = self.cozy_since is not None
         points_changed = settings.points != self.points or (
             cozy_in_use and settings.cozy_points != self.cozy_points
         )
@@ -376,37 +372,15 @@ class RoomManager:
 
     def target(self, now: dt.datetime) -> Target | None:
         """Return the schedule's target at a time, in cozy mode or not."""
-        share = self._cozy_share(now)
-        sun = hass_sun(self.hass)
-        if share == 0:
-            return target_at(self.points, now, sun)
-        if share == 1:
-            return target_at(self.cozy_points, now, sun)
-        normal = target_at(self.points, now, sun)
-        cozy = target_at(self.cozy_points, now, sun)
-        if normal is None or cozy is None:
-            return normal or cozy
-        return blend(normal, cozy, share)
-
-    def _cozy_share(self, now: dt.datetime) -> float:
-        """Return how far the target is on the way to cozy mode."""
-        share = float(self.cozy_since is not None)
-        if self._cozy_blend is None:
-            return share
-        started, start_share = self._cozy_blend
-        progress = (now - started) / COZY_BLEND
-        if progress >= 1:
-            return share
-        return start_share + max(progress, 0) * (share - start_share)
+        points = self.points if self.cozy_since is None else self.cozy_points
+        return target_at(points, now, hass_sun(self.hass))
 
     @callback
     def async_set_cozy(self, on: bool) -> None:
-        """Turn cozy mode on or off, moving to its curve over a while."""
+        """Turn cozy mode on or off, which applies its curve right away."""
         if (self.cozy_since is not None) == on:
             return
-        now = dt_util.now()
-        self._cozy_blend = (now, self._cozy_share(now))
-        self.cozy_since = now if on else None
+        self.cozy_since = dt_util.now() if on else None
         self._async_store_cozy()
         self._async_schedule_changed()
 
@@ -428,12 +402,15 @@ class RoomManager:
 
     @callback
     def _async_schedule_changed(self) -> None:
-        """Tell the sensor and switches, and apply the new target soon."""
+        """Tell the sensor and switches, and apply the new target soon.
+
+        Even if it is close to what the lights show, a new curve shows.
+        """
         for update in list(self._schedule_listeners):
             update()
         for automation in self._automations.values():
             automation.async_update_target()
-            automation.async_apply_soon()
+            automation.async_apply_soon(exact=True)
 
     @callback
     def async_add_schedule_listener(self, update: CALLBACK_TYPE) -> CALLBACK_TYPE:

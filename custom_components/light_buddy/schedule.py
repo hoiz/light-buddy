@@ -154,12 +154,6 @@ def target_at(
     return Target(round(MIRED / mired))
 
 
-def blend(first: Target, second: Target, share: float) -> Target:
-    """Return a share of the way from one target to another, in mired."""
-    mired = (1 - share) * MIRED / first.kelvin + share * MIRED / second.kelvin
-    return Target(round(MIRED / mired))
-
-
 def point_time(
     point: SchedulePoint, day: dt.date, tzinfo: dt.tzinfo, sun: Sun | None
 ) -> dt.datetime | None:

@@ -248,9 +248,12 @@ class RoomAutomation:
             self._async_start_auto_resume()
 
     @callback
-    def async_apply_soon(self) -> None:
-        """Apply the schedule now, e.g. after it was changed."""
-        self.async_track(self._async_apply())
+    def async_apply_soon(self, *, exact: bool = False) -> None:
+        """Apply the schedule now, e.g. after it was changed.
+
+        Exact, lights get even changes smaller than the threshold.
+        """
+        self.async_track(self._async_apply(threshold=0 if exact else None))
 
     @callback
     def async_track(self, coro: Coroutine[Any, Any, None]) -> asyncio.Task[None]:
@@ -397,6 +400,7 @@ class RoomAutomation:
         self,
         transition: float | None = None,
         members: list[str] | None = None,
+        threshold: float | None = None,
     ) -> None:
         async with self._apply_lock:
             # While paused, the color stays as it was set by hand.
@@ -409,7 +413,9 @@ class RoomAutomation:
                     self.target,
                     self.settings.transition if transition is None else transition,
                     members=members,
-                    threshold=self.settings.threshold,
+                    threshold=self.settings.threshold
+                    if threshold is None
+                    else threshold,
                 )
             except Exception:
                 # Failed calls are logged per light, the next tick tries again.

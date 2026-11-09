@@ -89,9 +89,9 @@ Every room follows one color temperature schedule, which follows the sun. The su
 
 The morning gets cold fast, so you are awake: about two hours after sunrise it is already at the coldest value, and it stays there until solar noon. In the afternoon it gets warmer slowly, and at night it holds the warmest value. Between the points, the color temperature changes the way daylight does, in mired, matching how the eye perceives color temperature.
 
-![The curve on an autumn day in Berlin, with the longest and the shortest day as thin lines](assets/curve.svg)
+![The curve on an autumn day in Berlin, with the longest and the shortest day as thin lines, and cozy mode as a dashed line](assets/curve.svg)
 
-*The curve on an autumn day in Berlin. Thin lines: the longest and the shortest day of the year.*
+*The curve on an autumn day in Berlin. Thin lines: the longest and the shortest day of the year. Dashed: the same day in cozy mode.*
 
 **Entities:**
 
@@ -108,7 +108,7 @@ The morning gets cold fast, so you are awake: about two hours after sunrise it i
 | Sunset | Two thirds of the way back (about 2700 K) |
 | Sunset + 1:30, at the latest 22:00 | Cozy warmest (2400 K) |
 
-There is no morning boost: the morning gets colder slowly, until solar noon. Turning cozy mode on or off moves from one curve to the other over 10 minutes, so the lights don't jump. It turns itself off at 04:00, so the next morning is normal again; turned on after midnight, it lasts until 04:00 the following night. It stays on across restarts, but a 04:00 missed while Home Assistant was down ends it right away, without the 10 minutes. To have it every weekend, turn it on with an automation, e.g. with the Workday integration or the weather. Lights that cannot go as warm as the cozy values get the closest value they support. The cozy values are up to you; nothing stops them from being colder than the normal ones. Rooms whose Schedule switch is off are left alone, as always.
+The dashed line in the chart above shows the cozy curve. There is no morning boost: the morning gets colder slowly, until solar noon. Turning cozy mode on or off switches the curve right away: lights that are on get the new value with the schedule's transition, even a small change. It turns itself off at 04:00, so the next morning is normal again; turned on after midnight, it lasts until 04:00 the following night. It stays on across restarts, unless a 04:00 passed while Home Assistant was down. To have it every weekend, turn it on with an automation, e.g. with the Workday integration or the weather. Lights that cannot go as warm as the cozy values get the closest value they support. The cozy values are up to you; nothing stops them from being colder than the normal ones. Rooms whose Schedule switch is off, or with a color set by hand, are left alone, as always.
 
 **How it behaves:**
 

@@ -56,7 +56,7 @@
           "disco_interval": "Seconds until the next color. Each color change sends one command per color, so very short times load the Zigbee network.",
           "disco_palette": "The colors the disco mode cycles through. Each light shows a different one."
         },
-        "description": "![Curve]({chart})\n\nThe schedule follows the sun: warmest from late evening until sunrise (not before 06:00, not after 07:30), coldest from about two hours after sunrise until solar noon. The chart shows the saved values for today, and thin lines for the longest and shortest day. The dashed line shows today in cozy mode."
+        "description": "![Curve]({chart})\n\nThe schedule follows the sun: warmest from late evening until sunrise (not before 06:00, not after 07:30), coldest from about two hours after sunrise until solar noon. The chart shows the saved values for today, and thin lines for the longest and shortest day. The dashed line shows today in cozy mode: warmer, without the morning boost, coldest only at solar noon. Turning cozy mode on or off switches between the curves right away."
       }
     },
     "error": {

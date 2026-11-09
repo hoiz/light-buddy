@@ -56,7 +56,7 @@
           "disco_interval": "Sekunden bis zur nächsten Farbe. Jeder Farbwechsel sendet einen Befehl pro Farbe, sehr kurze Zeiten belasten also das Zigbee-Netz.",
           "disco_palette": "Die Farben, durch die der Disco-Modus wechselt. Jede Lampe zeigt eine andere."
         },
-        "description": "![Kurve]({chart})\n\nDer Zeitplan folgt der Sonne: am wärmsten vom späten Abend bis zum Sonnenaufgang (nicht vor 06:00, nicht nach 07:30), am kältesten ab etwa zwei Stunden nach Sonnenaufgang bis zum Sonnenhöchststand. Die Kurve zeigt die gespeicherten Werte für heute, dünne Linien den längsten und den kürzesten Tag. Die gestrichelte Linie zeigt heute im gemütlichen Modus."
+        "description": "![Kurve]({chart})\n\nDer Zeitplan folgt der Sonne: am wärmsten vom späten Abend bis zum Sonnenaufgang (nicht vor 06:00, nicht nach 07:30), am kältesten ab etwa zwei Stunden nach Sonnenaufgang bis zum Sonnenhöchststand. Die Kurve zeigt die gespeicherten Werte für heute, dünne Linien den längsten und den kürzesten Tag. Die gestrichelte Linie zeigt heute im gemütlichen Modus: wärmer, ohne Morgen-Boost, am kältesten erst zum Sonnenhöchststand. Ein- und Ausschalten des gemütlichen Modus wechselt sofort zwischen den Kurven."
       }
     },
     "error": {

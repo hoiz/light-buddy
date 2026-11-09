@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from custom_components.light_buddy.automation import ScheduleSettings
 from custom_components.light_buddy.chart import render_svg
 from custom_components.light_buddy.schedule import DEFAULT_SCHEDULE, Sun
 
@@ -19,5 +20,12 @@ SUN = Sun(52.52, 13.40)
 
 Path(__file__).with_name("curve.svg").write_text(
     # A picture of no particular moment.
-    render_svg(DEFAULT_SCHEDULE, NOW, "en", SUN, show_now=False)
+    render_svg(
+        DEFAULT_SCHEDULE,
+        NOW,
+        "en",
+        SUN,
+        show_now=False,
+        cozy_points=ScheduleSettings().cozy_points,
+    )
 )

@@ -85,8 +85,6 @@ MIN_SCHEDULE_SPAN_KELVIN: Final = 500
 # their defaults.
 COZY_WARMEST_KELVIN: Final = 2400
 COZY_COLDEST_KELVIN: Final = 3500
-# Turning cozy mode on or off moves between the curves over this time.
-COZY_BLEND: Final = timedelta(minutes=10)
 # Cozy mode ends by itself at this time, so the next morning is normal, but
 # not before it was on this long.
 COZY_OFF_TIME: Final = time(4, 0)

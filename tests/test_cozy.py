@@ -20,7 +20,6 @@ from custom_components.light_buddy.chart import (
 )
 from custom_components.light_buddy.schedule import (
     DEFAULT_SCHEDULE,
-    MIRED,
     NOON,
     SUNRISE,
     Sun,
@@ -88,71 +87,35 @@ def test_cozy_points() -> None:
     assert [point.kelvin for point in COZY_SCHEDULE] == [2400, 3500, 2690, 2400]
 
 
-async def test_switch_blends_to_cozy_and_back(
+async def test_switch_applies_right_away(
     hass: HomeAssistant, add_light, setup_integration, freezer: FrozenDateTimeFactory
 ) -> None:
-    """The target moves to the cozy curve over ten minutes, and back."""
+    """Turning cozy mode on or off switches the curve at once."""
     lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(5000))
     entry = await setup_integration(schedule=True, sun=True)
     calls = async_mock_service(hass, "light", "turn_on")
     await _wait(hass, freezer, 1)
-    normal = _target(hass, DEFAULT_SCHEDULE)
-    assert _sensor(hass) == normal
+    assert _sensor(hass) == _target(hass, DEFAULT_SCHEDULE)
     assert hass.states.get(COZY).state == STATE_OFF
 
     await _switch(hass, "turn_on")
     assert hass.states.get(COZY).state == STATE_ON
     assert dt_util.parse_datetime(entry.options["cozy_since"]) == dt_util.now()
+    cozy = _target(hass, COZY_SCHEDULE)
+    assert _sensor(hass) == cozy
+    assert calls[-1].data == {
+        "entity_id": [lamp],
+        "color_temp_kelvin": cozy,
+        "transition": 2,
+    }
 
-    await _wait(hass, freezer, 5)
-    halfway = _sensor(hass)
-    normal, cozy = _target(hass, DEFAULT_SCHEDULE), _target(hass, COZY_SCHEDULE)
-    assert cozy < halfway < normal
-    # Even in mired.
-    assert MIRED / halfway == pytest.approx(
-        (MIRED / normal + MIRED / cozy) / 2, rel=0.01
-    )
-
-    await _wait(hass, freezer, 6)
-    assert _sensor(hass) == _target(hass, COZY_SCHEDULE)
-    assert calls[-1].data["entity_id"] == [lamp]
-    assert calls[-1].data["color_temp_kelvin"] == _sensor(hass)
-    # Steps, not a jump.
-    assert len(calls) >= 5
-
+    hass.states.async_set(lamp, STATE_ON, _on(cozy))
     await _switch(hass, "turn_off")
     assert hass.states.get(COZY).state == STATE_OFF
     assert "cozy_since" not in entry.options
-    await _wait(hass, freezer, 5)
-    assert (
-        _target(hass, COZY_SCHEDULE) < _sensor(hass) < _target(hass, DEFAULT_SCHEDULE)
-    )
-    await _wait(hass, freezer, 6)
-    assert _sensor(hass) == _target(hass, DEFAULT_SCHEDULE)
-
-
-async def test_turned_off_midway_turns_back_smoothly(
-    hass: HomeAssistant, add_light, setup_integration, freezer: FrozenDateTimeFactory
-) -> None:
-    """Turned off during the blend, it turns back from where it is."""
-    add_light("lamp", area="Wohnzimmer")
-    await setup_integration(schedule=True, sun=True)
-    await _switch(hass, "turn_on")
-    await _wait(hass, freezer, 5)
-    before = _sensor(hass)
-
-    await _switch(hass, "turn_off")
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-    assert abs(_sensor(hass) - before) < 20
-
-    # On its way back, reaching the normal curve after the blend.
-    values = [before]
-    for _ in range(10):
-        await _wait(hass, freezer, 1)
-        values.append(_sensor(hass))
-    assert values == sorted(values)
-    assert values[-1] == _target(hass, DEFAULT_SCHEDULE)
+    normal = _target(hass, DEFAULT_SCHEDULE)
+    assert _sensor(hass) == normal
+    assert calls[-1].data["color_temp_kelvin"] == normal
 
 
 async def test_off_at_night(
@@ -199,7 +162,7 @@ async def test_kept_across_restarts(
     assert hass.states.get(COZY).state == state
     assert ("cozy_since" in entry.options) is (state == STATE_ON)
     if state == STATE_ON:
-        # Back on its curve right away, without a blend.
+        # Back on its curve right away.
         assert _sensor(hass) == _target(hass, COZY_SCHEDULE)
 
 
@@ -213,7 +176,8 @@ async def test_paused_room_is_left_alone(
     entry.runtime_data._automations["wohnzimmer"].async_mark_manual()
 
     await _switch(hass, "turn_on")
-    await _wait(hass, freezer, 11)
+    assert calls == []
+    await _wait(hass, freezer, 1)
     assert calls == []
 
 
@@ -315,12 +279,12 @@ async def test_turned_on_after_midnight_lasts_the_day(
 async def test_toggle_needs_no_reload(
     hass: HomeAssistant, add_light, setup_integration, freezer: FrozenDateTimeFactory
 ) -> None:
-    """Storing cozy mode does not reload, nor send anything once settled."""
+    """Storing cozy mode does not reload, nor send anything when already on the cozy curve."""
     add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(5000))
     entry = await setup_integration(schedule=True, sun=True)
     manager = entry.runtime_data
     await _switch(hass, "turn_on")
-    await _wait(hass, freezer, 11)
+    await _wait(hass, freezer, 1)
     assert entry.runtime_data is manager
 
     calls = async_mock_service(hass, "light", "turn_on")
@@ -344,5 +308,47 @@ async def test_schedule_off_and_disco_are_left_alone(
     calls = async_mock_service(hass, "light", "turn_on")
 
     await _switch(hass, "turn_on")
-    await _wait(hass, freezer, 11)
     assert calls == []
+    await _wait(hass, freezer, 1)
+    assert calls == []
+
+
+async def test_small_change_is_sent(
+    hass: HomeAssistant, add_light, setup_integration, freezer: FrozenDateTimeFactory
+) -> None:
+    """Switching the curve is sent even below the smallest change."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(5000))
+    await setup_integration(
+        {"settings": {"threshold": 500, "cozy_warmest": 2600, "cozy_coldest": 4800}},
+        schedule=True,
+        sun=True,
+    )
+    calls = async_mock_service(hass, "light", "turn_on")
+    await _switch(hass, "turn_on")
+    assert calls[-1].data["entity_id"] == [lamp]
+    assert calls[-1].data["color_temp_kelvin"] == _sensor(hass)
+    assert _sensor(hass) == _target(hass, sun_schedule(2600, 4800, boost=False))
+    assert 0 < 5000 - _sensor(hass) < 500
+
+
+async def test_off_at_night_applies_right_away(
+    hass: HomeAssistant, add_light, setup_integration, freezer: FrozenDateTimeFactory
+) -> None:
+    """At 04:00, lights that are on get the normal curve."""
+    lamp = add_light("lamp", area="Wohnzimmer", state=STATE_ON, attributes=_on(2400))
+    await setup_integration(
+        {"cozy_since": "2026-10-26T20:00:00-07:00"}, schedule=True, sun=True
+    )
+    freezer.move_to("2026-10-27 03:59:00-07:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    calls = async_mock_service(hass, "light", "turn_on")
+
+    freezer.move_to("2026-10-27 04:00:00-07:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert calls[-1].data == {
+        "entity_id": [lamp],
+        "color_temp_kelvin": _target(hass, DEFAULT_SCHEDULE),
+        "transition": 2,
+    }

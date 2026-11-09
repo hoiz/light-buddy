@@ -10,10 +10,8 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
-from .automation import hass_sun
 from .const import SCHEDULE_INTERVAL
 from .manager import TARGET_SENSOR_UNIQUE_ID, LightBuddyConfigEntry, RoomManager
-from .schedule import target_at
 
 PARALLEL_UPDATES = 0
 
@@ -60,11 +58,7 @@ class TargetColorTempSensor(SensorEntity):
 
     @callback
     def _async_update(self) -> None:
-        target = target_at(
-            self._manager.points,
-            dt_util.now(),
-            hass_sun(self.hass),
-        )
+        target = self._manager.target(dt_util.now())
         self._attr_native_value = target.kelvin if target else None
 
     @callback

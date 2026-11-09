@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
+import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -30,17 +31,23 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.target import (
     TargetSelection,
     async_extract_referenced_entity_ids,
 )
+from homeassistant.util import dt as dt_util
 
-from .automation import RoomAutomation, ScheduleSettings, sets_color
+from .automation import RoomAutomation, ScheduleSettings, hass_sun, sets_color
 from .const import (
+    CONF_COZY_SINCE,
     CONF_EXCLUDED_AREAS,
     CONF_EXCLUDED_LIGHTS,
     CONF_OFFSETS,
     CONF_SCHEDULES_OFF,
+    COZY_BLEND,
+    COZY_MIN_DURATION,
+    COZY_OFF_TIME,
     MEMBERSHIP_DEBOUNCE_SECONDS,
     SEPARATE_ALL,
     SEPARATE_IKEA,
@@ -48,6 +55,7 @@ from .const import (
 from .disco import DiscoSettings
 from .membership import async_resolve_rooms
 from .offset import ColorTempOffset
+from .schedule import Target, blend, target_at
 
 if TYPE_CHECKING:
     from .entity import LightOffsetEntity, RoomEntity
@@ -65,8 +73,15 @@ REFRESH_FIELDS = frozenset(
 )
 
 
-# Of the one sensor all rooms share.
+# Of the one sensor and the one switch all rooms share.
 TARGET_SENSOR_UNIQUE_ID = "target_color_temp"
+COZY_SWITCH_UNIQUE_ID = "cozy_mode"
+GLOBAL_ENTITIES = frozenset(
+    {
+        (Platform.SENSOR, TARGET_SENSOR_UNIQUE_ID),
+        (Platform.SWITCH, COZY_SWITCH_UNIQUE_ID),
+    }
+)
 
 
 class RoomManager:
@@ -90,6 +105,19 @@ class RoomManager:
         self.separate_lights: set[str] = set()
         self.settings = ScheduleSettings.from_options(entry.options)
         self.points = self.settings.points
+        self.cozy_points = self.settings.cozy_points
+        # When cozy mode was turned on, None while it is off.
+        self.cozy_since = _cozy_since(entry.options)
+        # Its end was missed while Home Assistant was not running, or what
+        # was stored is unreadable.
+        if CONF_COZY_SINCE in entry.options and (
+            self.cozy_since is None or dt_util.now() >= _cozy_end(self.cozy_since)
+        ):
+            self.cozy_since = None
+            self._async_store_cozy()
+        # Moving between the curves: when it started, and the share of cozy
+        # mode then.
+        self._cozy_blend: tuple[dt.datetime, float] | None = None
         self.disco_settings = DiscoSettings.from_options(entry.options)
         self._exclusions = _exclusions(entry.options)
         self._lights: dict[str, RoomLight] = {}
@@ -112,6 +140,15 @@ class RoomManager:
         """Create the entities and listen for registry changes."""
         self.entry.async_on_unload(self._debouncer.async_shutdown)
         self.entry.async_on_unload(self._async_stop_automations)
+        self.entry.async_on_unload(
+            async_track_time_change(
+                self.hass,
+                self._async_cozy_off_time,
+                hour=COZY_OFF_TIME.hour,
+                minute=COZY_OFF_TIME.minute,
+                second=COZY_OFF_TIME.second,
+            )
+        )
         self.entry.async_on_unload(
             self.hass.bus.async_listen(
                 EVENT_CALL_SERVICE,
@@ -249,23 +286,20 @@ class RoomManager:
         Also switches a room's lights can no longer use.
         """
         area_ids = room_classes.keys()
-        wanted = (
-            {
-                f"{area_id}{suffix}"
-                for area_id, classes in room_classes.items()
-                for suffix in ("", *(cls.UNIQUE_ID_SUFFIX for cls in classes))
-            }
-            | {
-                f"{registry_id}{cls.UNIQUE_ID_SUFFIX}"
-                for registry_id in registry_ids
-                for cls in offset_entity_classes()
-            }
-            | {TARGET_SENSOR_UNIQUE_ID}
-        )
+        wanted = {
+            f"{area_id}{suffix}"
+            for area_id, classes in room_classes.items()
+            for suffix in ("", *(cls.UNIQUE_ID_SUFFIX for cls in classes))
+        } | {
+            f"{registry_id}{cls.UNIQUE_ID_SUFFIX}"
+            for registry_id in registry_ids
+            for cls in offset_entity_classes()
+        }
         for registry_entry in er.async_entries_for_config_entry(
             entity_registry, self.entry.entry_id
         ):
-            if registry_entry.unique_id not in wanted:
+            key = (registry_entry.domain, registry_entry.unique_id)
+            if key not in GLOBAL_ENTITIES and registry_entry.unique_id not in wanted:
                 entity_registry.async_remove(registry_entry.entity_id)
 
         # Removing from the registry removes added entities. Those never added,
@@ -291,8 +325,8 @@ class RoomManager:
                     lambda area_id=area_id: self._lights.get(area_id),
                     area_id not in self.entry.options.get(CONF_SCHEDULES_OFF, ()),
                     self._async_store_schedule_enabled,
+                    self.target,
                 )
-                automation.async_set_points(self.points)
                 automation.async_set_settings(self.settings)
                 automation.async_set_disco_settings(self.disco_settings)
                 self._automations[area_id] = automation
@@ -309,33 +343,97 @@ class RoomManager:
         Options the entities store themselves, e.g. offsets, change neither.
         """
         settings = ScheduleSettings.from_options(self.entry.options)
-        points = settings.points
         disco_settings = DiscoSettings.from_options(self.entry.options)
         if disco_settings != self.disco_settings:
             self.disco_settings = disco_settings
             for automation in self._automations.values():
                 automation.async_set_disco_settings(disco_settings)
-        if points == self.points and settings == self.settings:
+        if settings == self.settings:
             return
         separate_changed = settings.separate_commands != self.settings.separate_commands
+        # The cozy points only matter while they are in use.
+        cozy_in_use = self._cozy_share(dt_util.now()) > 0
+        points_changed = settings.points != self.points or (
+            cozy_in_use and settings.cozy_points != self.cozy_points
+        )
         # Only these change what the lights get.
         target_changed = (
-            points != self.points
+            points_changed
             or settings.threshold != self.settings.threshold
             or settings.transition != self.settings.transition
         )
-        points_changed = points != self.points
-        self.points, self.settings = points, settings
-        if points_changed:
-            for update in list(self._schedule_listeners):
-                update()
+        self.settings = settings
+        self.points, self.cozy_points = settings.points, settings.cozy_points
         for automation in self._automations.values():
-            automation.async_set_points(points)
             automation.async_set_settings(settings)
-            if target_changed:
+        if points_changed:
+            self._async_schedule_changed()
+        elif target_changed:
+            for automation in self._automations.values():
                 automation.async_apply_soon()
         if separate_changed:
             self._async_update_separate_lights()
+
+    def target(self, now: dt.datetime) -> Target | None:
+        """Return the schedule's target at a time, in cozy mode or not."""
+        share = self._cozy_share(now)
+        sun = hass_sun(self.hass)
+        if share == 0:
+            return target_at(self.points, now, sun)
+        if share == 1:
+            return target_at(self.cozy_points, now, sun)
+        normal = target_at(self.points, now, sun)
+        cozy = target_at(self.cozy_points, now, sun)
+        if normal is None or cozy is None:
+            return normal or cozy
+        return blend(normal, cozy, share)
+
+    def _cozy_share(self, now: dt.datetime) -> float:
+        """Return how far the target is on the way to cozy mode."""
+        share = float(self.cozy_since is not None)
+        if self._cozy_blend is None:
+            return share
+        started, start_share = self._cozy_blend
+        progress = (now - started) / COZY_BLEND
+        if progress >= 1:
+            return share
+        return start_share + max(progress, 0) * (share - start_share)
+
+    @callback
+    def async_set_cozy(self, on: bool) -> None:
+        """Turn cozy mode on or off, moving to its curve over a while."""
+        if (self.cozy_since is not None) == on:
+            return
+        now = dt_util.now()
+        self._cozy_blend = (now, self._cozy_share(now))
+        self.cozy_since = now if on else None
+        self._async_store_cozy()
+        self._async_schedule_changed()
+
+    @callback
+    def _async_cozy_off_time(self, now: dt.datetime) -> None:
+        if self.cozy_since is not None and now >= _cozy_end(self.cozy_since):
+            self.async_set_cozy(False)
+
+    @callback
+    def _async_store_cozy(self) -> None:
+        options = {
+            key: value
+            for key, value in self.entry.options.items()
+            if key != CONF_COZY_SINCE
+        }
+        if self.cozy_since is not None:
+            options[CONF_COZY_SINCE] = self.cozy_since.isoformat()
+        self.hass.config_entries.async_update_entry(self.entry, options=options)
+
+    @callback
+    def _async_schedule_changed(self) -> None:
+        """Tell the sensor and switches, and apply the new target soon."""
+        for update in list(self._schedule_listeners):
+            update()
+        for automation in self._automations.values():
+            automation.async_update_target()
+            automation.async_apply_soon()
 
     @callback
     def async_add_schedule_listener(self, update: CALLBACK_TYPE) -> CALLBACK_TYPE:
@@ -573,6 +671,28 @@ class RoomManager:
 
         if room is not None and requested is not None:
             await room.async_set_member_color_temp(entity_id, requested)
+
+
+def _cozy_since(options: Mapping[str, Any]) -> dt.datetime | None:
+    """Return when cozy mode was turned on, None if it is off or unreadable."""
+    if not isinstance(since := options.get(CONF_COZY_SINCE), str):
+        return None
+    try:
+        parsed = dt_util.parse_datetime(since, raise_on_error=True)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _cozy_end(since: dt.datetime) -> dt.datetime:
+    """Return when cozy mode turned on at a time ends by itself.
+
+    At the first 04:00 that is a while away, so turned on after midnight, it
+    lasts the coming day.
+    """
+    earliest = dt_util.as_local(since + COZY_MIN_DURATION)
+    end = dt.datetime.combine(earliest.date(), COZY_OFF_TIME, tzinfo=earliest.tzinfo)
+    return end if end >= earliest else end + dt.timedelta(days=1)
 
 
 def _room_entity_classes(

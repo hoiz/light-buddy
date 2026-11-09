@@ -35,6 +35,8 @@
         "data": {
           "warmest": "Wärmste Farbtemperatur",
           "coldest": "Kälteste Farbtemperatur",
+          "cozy_warmest": "Wärmste Farbtemperatur im gemütlichen Modus",
+          "cozy_coldest": "Kälteste Farbtemperatur im gemütlichen Modus",
           "threshold": "Kleinste Änderung",
           "transition": "Übergang",
           "auto_resume_minutes": "Fortsetzen nach",
@@ -45,6 +47,8 @@
         "data_description": {
           "warmest": "Nachts, frühmorgens und ab 1:30 nach Sonnenuntergang (spätestens 22:00).",
           "coldest": "Ab etwa zwei Stunden nach Sonnenaufgang (nicht vor 08:00, nicht nach 09:00) bis zum Sonnenhöchststand.",
+          "cozy_warmest": "Solange der gemütliche Modus an ist: nachts, früh morgens und spät abends.",
+          "cozy_coldest": "Solange der gemütliche Modus an ist: zum Sonnenhöchststand. Der gemütliche Modus hat keinen Morgen-Boost.",
           "threshold": "Eingeschaltete Lampen bekommen erst eine neue Farbtemperatur, wenn der Zielwert mindestens so weit abweicht.",
           "transition": "Für die Anpassungen des Zeitplans jede Minute. Kurz halten: IKEA-Lampen ignorieren während eines Übergangs andere Befehle, sogar das Ausschalten.",
           "auto_resume_minutes": "Nach einer manuellen Änderung schaltet sich der Zeitplan-Schalter des Raums nach dieser Zeit von selbst wieder ein. 0 wartet, bis der Raum aus ist.",
@@ -52,11 +56,12 @@
           "disco_interval": "Sekunden bis zur nächsten Farbe. Jeder Farbwechsel sendet einen Befehl pro Farbe, sehr kurze Zeiten belasten also das Zigbee-Netz.",
           "disco_palette": "Die Farben, durch die der Disco-Modus wechselt. Jede Lampe zeigt eine andere."
         },
-        "description": "![Kurve]({chart})\n\nDer Zeitplan folgt der Sonne: am wärmsten vom späten Abend bis zum Sonnenaufgang (nicht vor 06:00, nicht nach 07:30), am kältesten ab etwa zwei Stunden nach Sonnenaufgang bis zum Sonnenhöchststand. Die Kurve zeigt die gespeicherten Werte für heute, dünne Linien den längsten und den kürzesten Tag."
+        "description": "![Kurve]({chart})\n\nDer Zeitplan folgt der Sonne: am wärmsten vom späten Abend bis zum Sonnenaufgang (nicht vor 06:00, nicht nach 07:30), am kältesten ab etwa zwei Stunden nach Sonnenaufgang bis zum Sonnenhöchststand. Die Kurve zeigt die gespeicherten Werte für heute, dünne Linien den längsten und den kürzesten Tag. Die gestrichelte Linie zeigt heute im gemütlichen Modus."
       }
     },
     "error": {
-      "schedule_span": "Der kälteste Wert muss mindestens 500 K über dem wärmsten liegen."
+      "schedule_span": "Der kälteste Wert muss mindestens 500 K über dem wärmsten liegen.",
+      "cozy_span": "Auch im gemütlichen Modus muss der kälteste Wert mindestens 500 K über dem wärmsten liegen."
     }
   },
   "entity": {
@@ -95,6 +100,9 @@
       },
       "disco": {
         "name": "Disco {area}"
+      },
+      "cozy_mode": {
+        "name": "Gemütlicher Modus"
       }
     },
     "sensor": {

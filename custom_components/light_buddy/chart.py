@@ -8,7 +8,7 @@ import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
 import datetime as dt
-from functools import lru_cache
+from functools import lru_cache, partial
 from http import HTTPStatus
 import re
 from xml.sax.saxutils import escape
@@ -57,6 +57,8 @@ WARM_KELVIN = 2000
 COLD_KELVIN = 6500
 # Tells the lines of different days apart.
 DASHES = ("", "8 5", "2 4", "12 4 2 4")
+COZY_DASH = "6 4"
+COZY_NAMES = {"de": "Gemütlicher Modus", "en": "Cozy mode"}
 SEASON_NAMES = {
     "de": ("Längster Tag", "Kürzester Tag"),
     "en": ("Longest day", "Shortest day"),
@@ -267,19 +269,27 @@ def render_svg(
     sun: Sun | None = None,
     *,
     show_now: bool = True,
+    cozy_points: Sequence[SchedulePoint] = (),
 ) -> str:
-    """Return the schedule as an SVG chart of a day, marking now if asked."""
+    """Return the schedule as an SVG chart of a day, marking now if asked.
+
+    With cozy points, today's cozy curve is drawn dashed, too.
+    """
     assert now.tzinfo is not None
     day_curves, season_curves = curves(tuple(points), now.date(), now.tzinfo, sun)
+    cozy_samples = (
+        day_samples(cozy_points, now.date(), now.tzinfo, sun) if cozy_points else ()
+    )
     all_kelvin = [
         kelvin
         for samples in [
             *(samples for _, _, samples in day_curves),
             *(samples for _, samples in season_curves),
+            cozy_samples,
         ]
         for _, kelvin in samples
     ]
-    all_kelvin += [point.kelvin for point in points] or [2000, 6500]
+    all_kelvin += [point.kelvin for point in (*points, *cozy_points)] or [2000, 6500]
     # The axis ends on ticks around the curve.
     low = max((tick for tick in TICKS if tick <= min(all_kelvin)), default=TICKS[0])
     high = min((tick for tick in TICKS if tick >= max(all_kelvin)), default=TICKS[-1])
@@ -369,6 +379,10 @@ def render_svg(
             polyline(samples, f'stroke-width="1.5" stroke-opacity="0.6" {dash_attr}')
         )
         legend.append((season_names[index], f'stroke-width="1.5" {dash_attr}'))
+    if cozy_samples:
+        cozy_attr = f'stroke-width="2" stroke-dasharray="{COZY_DASH}" '
+        parts.append(polyline(cozy_samples, cozy_attr))
+        legend.append((COZY_NAMES.get(language, COZY_NAMES["en"]), cozy_attr))
     for index, (days, day, samples) in enumerate(day_curves):
         dash = DASHES[index % len(DASHES)]
         dash_attr = f'stroke-dasharray="{dash}" ' if dash else ""
@@ -410,6 +424,9 @@ class CurveChartView(HomeAssistantView):
         """Return the chart."""
         try:
             points = decode_points(request.query.get("points", ""))
+            cozy_points = (
+                decode_points(cozy) if (cozy := request.query.get("cozy")) else ()
+            )
         except ValueError:
             return web.Response(status=HTTPStatus.BAD_REQUEST, text="Invalid points")
         hass = request.app[KEY_HASS]
@@ -418,7 +435,14 @@ class CurveChartView(HomeAssistantView):
         # chart.
         async with hass.data.setdefault(DATA_RENDER_LOCK, asyncio.Lock()):
             svg = await hass.async_add_executor_job(
-                render_svg, points, dt_util.now(), language, hass_sun(hass)
+                partial(
+                    render_svg,
+                    points,
+                    dt_util.now(),
+                    language,
+                    hass_sun(hass),
+                    cozy_points=cozy_points,
+                )
             )
         return web.Response(
             body=svg,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Coroutine, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
 import datetime as dt
 import hashlib
@@ -20,11 +20,15 @@ from .const import (
     COLOR_TEMP_THRESHOLD_KELVIN,
     CONF_AUTO_RESUME_MINUTES,
     CONF_COLDEST,
+    CONF_COZY_COLDEST,
+    CONF_COZY_WARMEST,
     CONF_SEPARATE_COMMANDS,
     CONF_SETTINGS,
     CONF_THRESHOLD,
     CONF_TRANSITION,
     CONF_WARMEST,
+    COZY_COLDEST_KELVIN,
+    COZY_WARMEST_KELVIN,
     SCHEDULE_INTERVAL,
     SEPARATE_OFF,
     TRANSITION_SCHEDULE,
@@ -33,14 +37,7 @@ from .const import (
 )
 from .disco import DiscoSettings, RoomDisco
 from .room import COLOR_GROUP_ATTRS
-from .schedule import (
-    DEFAULT_SCHEDULE,
-    SchedulePoint,
-    Sun,
-    Target,
-    sun_schedule,
-    target_at,
-)
+from .schedule import SchedulePoint, Sun, Target, sun_schedule
 
 if TYPE_CHECKING:
     from .light import RoomLight
@@ -73,11 +70,19 @@ class ScheduleSettings:
     # The schedule's warmest and coldest color temperature, in Kelvin.
     warmest: int = WARMEST_KELVIN
     coldest: int = COLDEST_KELVIN
+    # The same, in cozy mode.
+    cozy_warmest: int = COZY_WARMEST_KELVIN
+    cozy_coldest: int = COZY_COLDEST_KELVIN
 
     @property
     def points(self) -> tuple[SchedulePoint, ...]:
         """Return the schedule's points."""
         return sun_schedule(self.warmest, self.coldest)
+
+    @property
+    def cozy_points(self) -> tuple[SchedulePoint, ...]:
+        """Return the points of cozy mode: warmer, and without the boost."""
+        return sun_schedule(self.cozy_warmest, self.cozy_coldest, boost=False)
 
     @classmethod
     def from_options(cls, options: Mapping[str, Any]) -> Self:
@@ -95,6 +100,8 @@ class ScheduleSettings:
             ),
             warmest=int(data.get(CONF_WARMEST, defaults.warmest)),
             coldest=int(data.get(CONF_COLDEST, defaults.coldest)),
+            cozy_warmest=int(data.get(CONF_COZY_WARMEST, defaults.cozy_warmest)),
+            cozy_coldest=int(data.get(CONF_COZY_COLDEST, defaults.cozy_coldest)),
         )
 
 
@@ -126,6 +133,7 @@ class RoomAutomation:
         get_light: Callable[[], RoomLight | None],
         enabled: bool,
         store_enabled: Callable[[str, bool], None],
+        get_target: Callable[[dt.datetime], Target | None],
     ) -> None:
         """Initialize the automation.
 
@@ -137,12 +145,13 @@ class RoomAutomation:
         self._get_light = get_light
         self.enabled = enabled
         self._store_enabled = store_enabled
+        # The schedule's target at a time, the same for all rooms.
+        self.get_target = get_target
         # Applying the schedule, by ticks and otherwise.
         self._tasks: set[asyncio.Task[None]] = set()
         self._tick: asyncio.Task[None] | None = None
         # Applies run one after another, so their commands do not interleave.
         self._apply_lock = asyncio.Lock()
-        self.points: tuple[SchedulePoint, ...] = DEFAULT_SCHEDULE
         self.settings = ScheduleSettings()
         self.target: Target | None = None
         self._listeners: list[CALLBACK_TYPE] = []
@@ -215,9 +224,8 @@ class RoomAutomation:
         return lambda: self._listeners.remove(update)
 
     @callback
-    def async_set_points(self, points: Sequence[SchedulePoint]) -> None:
-        """Follow another schedule from now on."""
-        self.points = tuple(points)
+    def async_update_target(self) -> None:
+        """Follow a changed schedule from now on."""
         self._async_update_target()
 
     @callback
@@ -409,7 +417,7 @@ class RoomAutomation:
 
     @callback
     def _async_update_target(self) -> None:
-        target = target_at(self.points, dt_util.now(), hass_sun(self.hass))
+        target = self.get_target(dt_util.now())
         if target != self.target:
             self.target = target
             self.async_notify()

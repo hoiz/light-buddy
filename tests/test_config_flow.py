@@ -86,6 +86,8 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
     assert _suggested(result) == {
         "warmest": 2700,
         "coldest": 5000,
+        "cozy_warmest": 2400,
+        "cozy_coldest": 3500,
         "threshold": 50,
         "transition": 2,
         "auto_resume_minutes": 0,
@@ -99,6 +101,8 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
         {
             "warmest": 3500,
             "coldest": 3800,
+            "cozy_warmest": 2400,
+            "cozy_coldest": 3500,
             "threshold": 100,
             "transition": 1.5,
             "auto_resume_minutes": 30,
@@ -114,6 +118,25 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
         {
             "warmest": 3000,
             "coldest": 5500,
+            "cozy_warmest": 3000,
+            "cozy_coldest": 3200,
+            "threshold": 100,
+            "transition": 1.5,
+            "auto_resume_minutes": 30,
+            "separate_commands": "ikea",
+            "disco_interval": 2,
+            "disco_palette": "party",
+        },
+    )
+    assert result["errors"] == {"base": "cozy_span"}
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "warmest": 3000,
+            "coldest": 5500,
+            "cozy_warmest": 2200,
+            "cozy_coldest": 3300,
             "threshold": 100,
             "transition": 1.5,
             "auto_resume_minutes": 30,
@@ -128,6 +151,8 @@ async def test_settings(hass: HomeAssistant, add_light, setup_integration) -> No
     assert entry.options["settings"] == {
         "warmest": 3000,
         "coldest": 5500,
+        "cozy_warmest": 2200,
+        "cozy_coldest": 3300,
         "threshold": 100,
         "transition": 1.5,
         "auto_resume_minutes": 30,

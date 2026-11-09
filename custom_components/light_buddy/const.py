@@ -1,6 +1,6 @@
 """Constants for the Light Buddy integration."""
 
-from datetime import timedelta
+from datetime import time, timedelta
 from typing import Final
 
 DOMAIN: Final = "light_buddy"
@@ -14,6 +14,9 @@ CONF_OFFSET_VALUE: Final = "value"
 # Areas whose schedule is turned off.
 CONF_SCHEDULES_OFF: Final = "schedules_off"
 
+# When cozy mode was turned on, absent while it is off.
+CONF_COZY_SINCE: Final = "cozy_since"
+
 # Global settings.
 CONF_SETTINGS: Final = "settings"
 CONF_THRESHOLD: Final = "threshold"
@@ -23,6 +26,9 @@ CONF_SEPARATE_COMMANDS: Final = "separate_commands"
 # The warmest and coldest color temperature of the schedule.
 CONF_WARMEST: Final = "warmest"
 CONF_COLDEST: Final = "coldest"
+# The cozy mode's warmest and coldest color temperature.
+CONF_COZY_WARMEST: Final = "cozy_warmest"
+CONF_COZY_COLDEST: Final = "cozy_coldest"
 CONF_DISCO_INTERVAL: Final = "disco_interval"
 CONF_DISCO_PALETTE: Final = "disco_palette"
 
@@ -74,3 +80,14 @@ DISCO_PALETTE: Final = "rainbow"
 WARMEST_KELVIN: Final = 2700
 COLDEST_KELVIN: Final = 5000
 MIN_SCHEDULE_SPAN_KELVIN: Final = 500
+
+# The cozy mode's warmest and coldest color temperature. Settings, these are
+# their defaults.
+COZY_WARMEST_KELVIN: Final = 2400
+COZY_COLDEST_KELVIN: Final = 3500
+# Turning cozy mode on or off moves between the curves over this time.
+COZY_BLEND: Final = timedelta(minutes=10)
+# Cozy mode ends by itself at this time, so the next morning is normal, but
+# not before it was on this long.
+COZY_OFF_TIME: Final = time(4, 0)
+COZY_MIN_DURATION: Final = timedelta(hours=4)

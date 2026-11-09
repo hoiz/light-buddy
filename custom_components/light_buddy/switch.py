@@ -1,4 +1,4 @@
-"""A schedule switch and a disco switch per room."""
+"""A schedule switch and a disco switch per room, and the cozy mode."""
 
 from typing import Any, override
 
@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .entity import RoomEntity
-from .manager import LightBuddyConfigEntry
+from .manager import COZY_SWITCH_UNIQUE_ID, LightBuddyConfigEntry, RoomManager
 
 PARALLEL_UPDATES = 0
 
@@ -19,11 +19,54 @@ async def async_setup_entry(
     entry: LightBuddyConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the room switches.
+    """Set up the cozy mode switch, and the room switches.
 
-    The room manager adds them once all platforms are set up.
+    The room manager adds the room switches once all platforms are set up.
     """
     entry.runtime_data.async_add_entities[Platform.SWITCH] = async_add_entities
+    async_add_entities([CozySwitch(entry.runtime_data)])
+
+
+class CozySwitch(SwitchEntity):
+    """Let all rooms follow a warmer curve, until the next night.
+
+    Rooms whose schedule is off or paused are left alone, as always.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_translation_key = "cozy_mode"
+    _attr_unique_id = COZY_SWITCH_UNIQUE_ID
+    _attr_icon = "mdi:sofa"
+
+    def __init__(self, manager: RoomManager) -> None:
+        """Initialize the switch."""
+        self._manager = manager
+        # Set, as Home Assistant would derive it from the translated name.
+        self.entity_id = f"{Platform.SWITCH}.cozy_mode"
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Follow cozy mode turning on and off."""
+        self.async_on_remove(
+            self._manager.async_add_schedule_listener(self.async_write_ha_state)
+        )
+
+    @property
+    @override
+    def is_on(self) -> bool:
+        """Return True while cozy mode is on."""
+        return self._manager.cozy_since is not None
+
+    @override
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Move all rooms to the cozy curve."""
+        self._manager.async_set_cozy(True)
+
+    @override
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Move all rooms back to the normal curve."""
+        self._manager.async_set_cozy(False)
 
 
 class ScheduleSwitch(RoomEntity, SwitchEntity):

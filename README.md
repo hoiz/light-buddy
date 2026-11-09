@@ -97,6 +97,18 @@ The morning gets cold fast, so you are awake: about two hours after sunrise it i
 
 - **Schedule** (`switch.schedule_<area>`), one per room with lights that support color temperature: on while the room follows the schedule. Turn it off to stop the schedule in that room; it stays off, also across restarts, until you turn it on again.
 - **Target color temperature** (`sensor.target_color_temperature`): the schedule's current value, the same for all rooms, e.g. for your own automations.
+- **Cozy mode** (`switch.cozy_mode`): one switch for the whole home, see below.
+
+**Cozy mode:** for gray days, weekends and holidays, when the light doesn't need to wake you up. While it is on, every room follows a warmer, flatter curve:
+
+| When | Color temperature |
+|---|---|
+| Sunrise, not before 06:00 and not after 07:30 | Cozy warmest (2400 K) |
+| Solar noon | Cozy coldest (3500 K) |
+| Sunset | Two thirds of the way back (about 2700 K) |
+| Sunset + 1:30, at the latest 22:00 | Cozy warmest (2400 K) |
+
+There is no morning boost: the morning gets colder slowly, until solar noon. Turning cozy mode on or off moves from one curve to the other over 10 minutes, so the lights don't jump. It turns itself off at 04:00, so the next morning is normal again; turned on after midnight, it lasts until 04:00 the following night. It stays on across restarts, but a 04:00 missed while Home Assistant was down ends it right away, without the 10 minutes. To have it every weekend, turn it on with an automation, e.g. with the Workday integration or the weather. Lights that cannot go as warm as the cozy values get the closest value they support. The cozy values are up to you; nothing stops them from being colder than the normal ones. Rooms whose Schedule switch is off are left alone, as always.
 
 **How it behaves:**
 
@@ -115,12 +127,14 @@ The morning gets cold fast, so you are awake: about two hours after sunrise it i
 
 The switch turns on again by itself when all lights in the room are off, and optionally after **Resume after**. Turning it on yourself applies the schedule right away.
 
-**Settings:** Light Buddy → **Configure** → **Settings** shows the curve as a chart: today, and thin lines for the longest and the shortest day of the year. It shows the saved values; after changing them, open the settings again to see the new curve.
+**Settings:** Light Buddy → **Configure** → **Settings** shows the curve as a chart: today, thin lines for the longest and the shortest day of the year, and a dashed line for today in cozy mode. It shows the saved values; after changing them, open the settings again to see the new curve.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | Warmest color temperature | 2700 K | At night, in the early morning and in the late evening. |
 | Coldest color temperature | 5000 K | From about two hours after sunrise until solar noon. At least 500 K above the warmest. |
+| Warmest color temperature in cozy mode | 2400 K | The same, while cozy mode is on. |
+| Coldest color temperature in cozy mode | 3500 K | At solar noon, while cozy mode is on. At least 500 K above the cozy warmest. |
 | Smallest change | 50 K | Lights that are on only get a new color temperature once the target differs at least this much. |
 | Transition | 2 s | For the updates every minute. IKEA lights ignore other commands during a transition, so keep it short. |
 | Resume after | 0 (never) | After a manual change, the Schedule switch turns on again by itself after this time. |

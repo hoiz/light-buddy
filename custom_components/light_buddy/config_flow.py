@@ -20,6 +20,8 @@ from .chart import URL as CHART_URL, encode_points
 from .const import (
     CONF_AUTO_RESUME_MINUTES,
     CONF_COLDEST,
+    CONF_COZY_COLDEST,
+    CONF_COZY_WARMEST,
     CONF_DISCO_INTERVAL,
     CONF_DISCO_PALETTE,
     CONF_EXCLUDED_AREAS,
@@ -119,6 +121,11 @@ class LightBuddyOptionsFlow(OptionsFlow):
             < MIN_SCHEDULE_SPAN_KELVIN
         ):
             errors["base"] = "schedule_span"
+        elif user_input is not None and (
+            user_input[CONF_COZY_COLDEST] - user_input[CONF_COZY_WARMEST]
+            < MIN_SCHEDULE_SPAN_KELVIN
+        ):
+            errors["base"] = "cozy_span"
         elif user_input is not None:
             options = {
                 key: value
@@ -131,6 +138,8 @@ class LightBuddyOptionsFlow(OptionsFlow):
                     CONF_SETTINGS: {
                         CONF_WARMEST: int(user_input[CONF_WARMEST]),
                         CONF_COLDEST: int(user_input[CONF_COLDEST]),
+                        CONF_COZY_WARMEST: int(user_input[CONF_COZY_WARMEST]),
+                        CONF_COZY_COLDEST: int(user_input[CONF_COZY_COLDEST]),
                         CONF_THRESHOLD: int(user_input[CONF_THRESHOLD]),
                         CONF_TRANSITION: float(user_input[CONF_TRANSITION]),
                         CONF_AUTO_RESUME_MINUTES: int(
@@ -147,6 +156,7 @@ class LightBuddyOptionsFlow(OptionsFlow):
         query = urlencode(
             {
                 "points": encode_points(settings.points),
+                "cozy": encode_points(settings.cozy_points),
                 "lang": self.hass.config.language,
             }
         )
@@ -160,6 +170,8 @@ class LightBuddyOptionsFlow(OptionsFlow):
                 or {
                     CONF_WARMEST: settings.warmest,
                     CONF_COLDEST: settings.coldest,
+                    CONF_COZY_WARMEST: settings.cozy_warmest,
+                    CONF_COZY_COLDEST: settings.cozy_coldest,
                     CONF_THRESHOLD: settings.threshold,
                     CONF_TRANSITION: settings.transition,
                     CONF_AUTO_RESUME_MINUTES: settings.auto_resume_minutes,
@@ -186,6 +198,24 @@ SETTINGS_SCHEMA = probatio.Schema(
             selector.NumberSelectorConfig(
                 min=3500,
                 max=6500,
+                step=50,
+                unit_of_measurement="K",
+                mode=selector.NumberSelectorMode.SLIDER,
+            )
+        ),
+        probatio.Required(CONF_COZY_WARMEST): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=2000,
+                max=3500,
+                step=50,
+                unit_of_measurement="K",
+                mode=selector.NumberSelectorMode.SLIDER,
+            )
+        ),
+        probatio.Required(CONF_COZY_COLDEST): selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=2500,
+                max=5000,
                 step=50,
                 unit_of_measurement="K",
                 mode=selector.NumberSelectorMode.SLIDER,

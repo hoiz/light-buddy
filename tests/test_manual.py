@@ -13,7 +13,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.light_buddy.automation import ScheduleSettings
-from custom_components.light_buddy.schedule import SchedulePoint
+from custom_components.light_buddy.schedule import SchedulePoint, target_at
 from homeassistant.components.light import DATA_COMPONENT, ColorMode
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import Context, HomeAssistant
@@ -47,6 +47,13 @@ def _curve(kelvin: int) -> tuple[SchedulePoint, ...]:
     return (SchedulePoint(kelvin, dt.time(0, 0)), SchedulePoint(kelvin, dt.time(12, 0)))
 
 
+def _set_curve(automation, kelvin: int) -> None:
+    """Have the automation follow a flat curve."""
+    points = _curve(kelvin)
+    automation.get_target = lambda now: target_at(points, now)
+    automation.async_update_target()
+
+
 async def _tick(hass: HomeAssistant) -> None:
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
     await hass.async_block_till_done()
@@ -60,7 +67,7 @@ async def _setup_room(hass: HomeAssistant, add_light, setup_integration, *lights
     ]
     entry = await setup_integration(schedule=True)
     automation = entry.runtime_data._automations["wohnzimmer"]
-    automation.async_set_points(_curve(4000))
+    _set_curve(automation, 4000)
     return automation, entity_ids
 
 
@@ -98,7 +105,7 @@ async def test_color_through_room_pauses(
     assert hass.states.get(SCHEDULE).state == STATE_OFF
 
     hass.states.async_set(lamp, STATE_ON, _on(2700), context=calls[0].context)
-    automation.async_set_points(_curve(5000))
+    _set_curve(automation, 5000)
     await _tick(hass)
     assert len(calls) == 1
 
@@ -113,7 +120,7 @@ async def test_dimming_does_not_pause(
     await _room(hass).async_turn_on(brightness=30)
     assert not automation.paused
     hass.states.async_set(lamp, STATE_ON, _on(4000, 30), context=calls[0].context)
-    automation.async_set_points(_curve(5000))
+    _set_curve(automation, 5000)
     await _tick(hass)
     assert calls[-1].data == {
         "entity_id": [lamp],
